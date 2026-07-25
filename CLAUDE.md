@@ -12,6 +12,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 |---|---|
 | [DatasetBuilder/](DatasetBuilder/) | C# CLI:清单驱动扫描训练用照片文件夹 → 指纹聚合(RAW/HEIF/JPG 合一)→ EXIF/rating → DINO(原片 CLS + 增强 CLS + patch)→ CV grid → 写入独立数据集库 + 覆盖率报告。深度 `ProjectReference` 共享项目 `PhotoViewer/PhotoViewer.csproj`,提取算法与产品共演进,不允许分叉实现。 |
 | [probes/](probes/) | Python 特征可行性探针:`feature_probe.py`(线性探针 + t-SNE,判断 backbone/增强/多视图是否够分)、`spatial_probe.py`(空间感知头判别,复用 `feature_probe` 的配对/split 逻辑)、`abs_probe.py`(§1.5 绝对性探针:abs_set 重标星级 × CLS,事件级留出 LOEO 主口径,复用 `feature_probe` 助手)。`out/` 是每次运行的覆盖式输出(不入库)。 |
+| [audit/](audit/) | 数据审计与标注集构建:`data_audit.py`(M1 §1.4 分布审计+阈值校准)、`cluster_mine.py`(相似团挖掘+代表资格审计,M2 代表池地基)、`abs_set_sampler.py`/`abs_pair_sampler.py`(§1.5 重标集)、`m2_pool_builder.py`(M2 标注池生成,plan-3-2 §6 决策 3)。`out/` 覆盖式输出(不入库)。 |
 | [onnx/](onnx/) | DINOv3 模型导出/校验:`export_dinov3_onnx.py` 从 HuggingFace/ModelScope 权重导出双输出(CLS + patch)ONNX;`verify_onnx_parity.py` 校验 PyTorch vs ONNX 一致性(cosine ≥ 0.999)。改动需同步 `PhotoViewer/Core/AI/DinoModelResources.cs`。 |
 | [notebooks/](notebooks/) | `cv_grid_design.ipynb` —— CV 网格设计 PoC(numpy 全量标量验证),已定型归档,不再迭代。 |
 | [plans/](plans/) | 三期计划文档:plan-3-0 宪法 + plan-3-1(M1 详案)+ plan-3-2/3-3/3-4 契约册,彼此用文件名相对链接。一/二期基建历史与 copilot 原始讨论已归还主仓 [../Plans/](../Plans/)(考古专用;已否定方向收编在 plan-3-0 §3 附录),现行基建状态以根 `CLAUDE.md` §5.4 为准。 |
