@@ -248,3 +248,12 @@
 - **判读（plan-3-3 §4 失败映射）**：M4 GATE"段内 ranking 达标"**不达标 → 不进 a/b/c**，按映射查表 = **全场景普遍平庸 → 特征可分性基础问题 → 回决策 8 升级梯逐级排查**。注意这同时威胁保底交付线（段内 ranking + 配额在新场上同样是跨场迁移）——升级梯不再是上行线的可选增强，而是两线的共同前提。
 - **升级梯现状**：梯1 ViT-S@518 证死；梯2 ViT-L@518 弱脉搏（top-1 0.333）；**梯3 = 1024 分辨率重提**（DatasetBuilder/ONNX 机制现成 ~1-2h，ViT-L@1024 兼顾脉搏+分辨率）;**梯4 = LoRA 微调**（宪法"最终逃生梯"，需 4080 CUDA torch 环境 + 微调管线，§1.5 已标"大概率"）。
 - **下一步**：用户裁定升级路径（梯3 先行 / 直上进梯4 / 并行）。
+
+
+### 2026-07-19 · 升级路径裁定（用户）：梯3 后台机械跑、梯4 LoRA 确认要走、会话于此分割
+
+- **裁定**：梯3（ViT-L/16@1024 重提）后台无人值守跑（用户预期"不会有本质区别"，但零决策成本）；**梯4（ViT-S LoRA 微调）确认必须走**——新工作包（4080 CUDA torch 环境 + 微调管线），**用户提议、双方确认会话于此分割**（方向已定调、状态全持久化，新会话从 STATUS.md + 本日志恢复）。
+- **梯3 管线**：`Training/train/m4_lenh1024_pipeline.sh`（后台 `bash-gddc1o0v`）——export(--image-size 1024) → parity(100 样本) → 全库重提（manifest + 旧批，`--model-id dinov3_vitl16_f32_1024_v1 --no-patch`；看门狗处理 DatasetBuilder 悬挂）→ 双路 CLS 覆盖 9418 校验 → M4 复测（`--model-id dinov3_vitl16_f32_1024_v1+clhe2.0ycc1.0`，out/m4_lenh1024）。**首跑失败修复**：HF 门控 repo 401 → --model-id 改本机 ModelScope 缓存路径（`~/.cache/modelscope/hub/models/facebook/dinov3-vitl16-pretrain-lvd1689m`，梯2 同款，脚本头有注）。
+- **梯3 判读基准（届时对照）**：梯2@518 = test top-1 0.333 / derived 0.615 / recall 0.148；S@518 = top-1 0.095。放大→升级梯有效继续；不放大→按裁定进梯4。
+- **梯4 交接要点**：环境 = 4080 装 CUDA torch（现 venv 为 CPU 版）；数据资产 = `audit/out/m3_pairs/`（pairs_train/val/test + photos.csv）、`audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分）、`audit/out/clusters/clusters.csv`；评估管线 = `Training/train/m4_baseline.py`（同口径复测即可比）；GATE 对照线 = 梯2 数字；EXIF 不进打分特征（v1 起弃用）。
+- **下一步**：新会话验收梯3结果 → 梯4 LoRA 开工。
