@@ -278,6 +278,9 @@ def main() -> int:
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "out" / "m2_offset"))
     ap.add_argument("--w-d1", type=float, default=W_D1_DEFAULT,
                     help="Δ=1 锚点对权重因子（默认 0.5；1.0 = 不降权对照）")
+    ap.add_argument("--exclude-events", default="",
+                    help="逗号分隔事件名：锚点反泄漏——这些事件的锚点（pool+abs）全部剔除后重拟合"
+                         "（M4 对 test/val 事件的干净潜分用，plan-3-2 §6.2 决策 9 反泄漏条款）")
     args = ap.parse_args()
 
     lib = load_library(args.clusters, args.db)
@@ -300,6 +303,14 @@ def main() -> int:
     print(f"锚点: pool {len(anchors)} + abs双职 {len(abs_top)} | 纯外验 abs非团顶 {len(abs_val)}")
 
     fit_anchors = anchors + abs_top
+    if args.exclude_events:
+        excl = set(args.exclude_events.split(","))
+        before = len(fit_anchors)
+        fit_anchors = [a for a in fit_anchors
+                       if lib[fp2ix[a["fp"]]]["event"] not in excl]
+        abs_val = [a for a in abs_val if lib[fp2ix[a["fp"]]]["event"] not in excl]
+        print(f"锚点反泄漏：剔除 {sorted(excl)} 事件锚点 {before - len(fit_anchors)} 个，"
+              f"剩 {len(fit_anchors)}（外验同步剔至 {len(abs_val)}）")
     a_idx = [fp2ix[a["fp"]] for a in fit_anchors]
     a_new = [a["new"] for a in fit_anchors]
     a_w = [a["weight"] for a in fit_anchors]
