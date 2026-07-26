@@ -1,6 +1,6 @@
 # STATUS — 三期当前进度
 
-> **进度真源：每次会话结束重写本文件（不追加）**。开工先读这里；实验证据链见 [EXECUTION-LOG.md](EXECUTION-LOG.md)（append-only）；**人读叙事版**见 [docs/analysis-story.md](docs/analysis-story.md)（图文并茂、持续更新）；计划见 [plans/](plans/)（plan-3-0 宪法 → plan-3-1 M1 详案）；入库批次台账见 [data/BATCHES.md](data/BATCHES.md)。
+> **进度真源：每次会话结束重写本文件（不追加）**。开工先读这里；实验证据链见 [EXECUTION-LOG.md](EXECUTION-LOG.md)（append-only）；**人读叙事版**见 [docs/analysis-story.md](docs/analysis-story.md)（图文并茂、持续更新）；**新会话/新 Agent 交接**见 [docs/agent-handover.md](docs/agent-handover.md)（需求锚点 + 结论链 + 方向调整 + 工程守则）；计划见 [plans/](plans/)（plan-3-0 宪法 → plan-3-1 M1 详案）；入库批次台账见 [data/BATCHES.md](data/BATCHES.md)。
 > 最近重写：2026-07-19 深夜（plan-3-2 §6 方案锁定、M2 开工）
 
 - **里程碑位置**：M1 关门；M2 校准（GATE 通过）；M3 训练对（GATE PASS）；**M4 基线段内 GATE 不达标（2026-07-19）**——cls 训练集 0.977 能背、test 对级 ~0.52 零迁移（管线无 bug，与 M1 探针证据链一致）；消融：CV 无跨场信号、**EXIF 反迁移（v1 起弃用进打分特征）**；**梯 2 ViT-L 唯一弱脉搏（test top-1 0.333 vs chance 0.155、茶博绝对序 -0.55→+0.27）**；按失败映射（§4 全场景平庸→特征可分性）**回决策 8 升级梯**——保底线同样依赖跨场迁移，升级梯成两线共同前提。下一步：用户裁定梯3（ViT-L@1024 重提 ~1-2h）/ 梯4（LoRA，4080 CUDA 环境）。
