@@ -257,3 +257,15 @@
 - **梯3 判读基准（届时对照）**：梯2@518 = test top-1 0.333 / derived 0.615 / recall 0.148；S@518 = top-1 0.095。放大→升级梯有效继续；不放大→按裁定进梯4。
 - **梯4 交接要点**：环境 = 4080 装 CUDA torch（现 venv 为 CPU 版）；数据资产 = `audit/out/m3_pairs/`（pairs_train/val/test + photos.csv）、`audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分）、`audit/out/clusters/clusters.csv`；评估管线 = `Training/train/m4_baseline.py`（同口径复测即可比）；GATE 对照线 = 梯2 数字；EXIF 不进打分特征（v1 起弃用）。
 - **下一步**：新会话验收梯3结果 → 梯4 LoRA 开工。
+
+
+### 2026-07-19 · 梯3（ViT-L/16@1024）完成：不放大，脉搏持平噪声带 → 梯4 LoRA 定为主路
+
+- **管线三跑**：首跑 HF 门控 401 → `--model-id` 改本机 ModelScope 缓存路径；二跑 C# 预处理输入尺寸硬编码 518（1024 模型 `pixel_values` 维度不符）→ `DinoFeatureExtractor` 加 `DetectInputSize` 按 ONNX 输入元数据自适应（产品 518 默认值不受影响，构建 0 错误）；三跑双 GATE PASS、双路 CLS 覆盖 9418×2（`dinov3_vitl16_f32_1024_v1(+clhe2.0ycc1.0)`）。
+- **公平性修正（两处）**：① `m4_baseline.py` 特征切片原为 ViT-S 硬编码（0:384）——梯2/梯3 的"all"轮 CLS 被静默截断 427/1024 且丢 CV/EXIF，改 `feat_slices` 按实测维度自适应；② PATIENCE 8→20（val 对级噪声致 all-feat 轮次欠训练早停）。**梯2 此前的 top-1 0.333 系截断特征+短轮次产物，降为粗参考**。
+- **公平复测（cls-only 全维、收敛 36-43 epoch）**：
+  - 梯2 L@518：test window 0.542 / derived 0.631 / **top-1 0.190** / recall 0.197；abs 茶博 +0.27 / 虎跑 +0.47 / 良渚 +0.09；
+  - 梯3 L@1024：test window 0.515 / derived 0.577 / **top-1 0.238** / recall 0.113；abs 三项转负（-0.19 ~ -0.27）。
+- **判读（用户预判"不会有本质区别"兑现）**：1024 分辨率**不放大** ViT-L 的弱脉搏，各项指标在噪声带内互有胜负——**瓶颈不是输入分辨率。梯3 关闭；梯4 LoRA = 主路**（宪法决策 8 最终逃生梯，用户已裁定要走）。
+- **评估教训（梯4 复测协议）**：val 对级（n=1771）近 chance 时早停选的 checkpoint 近乎随机 → test 指标 run 间漂移 ±0.1（梯2 两版 top-1 0.333 vs 0.190）。梯4 评估须：固定 epoch 预算或多种子、主指标组 = 段内 top-1 + seg-rho + Δ≥2 对级 + recall，abs 涌现 n 小仅作方向参考。
+- **下一步**：梯4 LoRA（新会话开工）：4080 CUDA torch 环境 + ViT-S LoRA 微调管线 + 上述复测协议。

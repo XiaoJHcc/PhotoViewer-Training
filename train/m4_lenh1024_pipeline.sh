@@ -26,10 +26,13 @@ run_dotnet() {  # $1=log 文件，其余=命令；GATE 出现即收尾
 }
 
 echo "===== [1/4] export ViT-L@1024 ====="
-$PY Training/onnx/export_dinov3_onnx.py --model-id $MID --output $ONNX --image-size 1024 || exit 1
-
-echo "===== [2/4] parity ====="
-$PY Training/onnx/verify_onnx_parity.py --model-id $MID --onnx $ONNX --image-size 1024 --samples 100 || exit 1
+if [ -f "$ONNX" ] && [ "${FORCE_EXPORT:-0}" != "1" ]; then
+  echo "已存在 $ONNX，跳过 export/parity（FORCE_EXPORT=1 强制重导）"
+else
+  $PY Training/onnx/export_dinov3_onnx.py --model-id $MID --output $ONNX --image-size 1024 || exit 1
+  echo "===== [2/4] parity ====="
+  $PY Training/onnx/verify_onnx_parity.py --model-id $MID --onnx $ONNX --image-size 1024 --samples 100 || exit 1
+fi
 
 echo "===== [3/4] 全库重提（manifest + 旧批） ====="
 run_dotnet "$LOGD/extract_manifest.log" dotnet run --project Training/DatasetBuilder -- \

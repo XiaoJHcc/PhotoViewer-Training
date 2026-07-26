@@ -43,15 +43,22 @@ M3_DIR_DEFAULT = "D:/Git/PhotoViewer/Training/audit/out/m3_pairs"
 ABS_KEY_DEFAULT = "D:/PhotoDB/dataset/abs_set_key.csv"
 ABS_TSV_DEFAULT = "D:/PhotoDB/dataset/abs_set_ratings.tsv"
 MODEL_ENH = "dinov3_vits16_f32_518_v1+clhe2.0ycc1.0"
-FEAT_SLICES = {"cls": (0, 384), "cv": (384, 419), "exif": (419, 427), "all": (0, 427)}
+CV_EXIF_DIM = 43                      # CV 35 + EXIF 8；CLS 维按实测（S=384 / L=1024）
 
 HIDDEN = (128, 64)
 EPOCHS = 60
-PATIENCE = 8
+PATIENCE = 20                       # val 对级噪声大，放长避免欠训练早停（此前 8 导致 all-feat 轮次欠收敛）
 BATCH = 2048
 LR = 1e-3
 WD = 1e-4
 SEED = 0
+
+
+def feat_slices(total_dim: int) -> dict[str, tuple[int, int]]:
+    """特征组切片：CLS 维按实测（total-43），避免 S/L 混用时截断 CLS。"""
+    d = total_dim - CV_EXIF_DIM
+    return {"cls": (0, d), "cv": (d, total_dim - 8), "exif": (total_dim - 8, total_dim),
+            "all": (0, total_dim)}
 
 
 # ---------------------------------------------------------------------------
@@ -295,8 +302,8 @@ def main() -> int:
     ap.add_argument("--abs-tsv", default=ABS_TSV_DEFAULT)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "out" / "m4_baseline"))
     ap.add_argument("--model-id", default=MODEL_ENH, help="CLS 视图（梯2 对照可换 ViT-L 同后缀）")
-    ap.add_argument("--feat-group", default="all", choices=list(FEAT_SLICES),
-                    help="特征组消融：cls/cv/exif/all")
+    ap.add_argument("--feat-group", default="all", choices=["cls", "cv", "exif", "all"],
+                    help="特征组消融：cls/cv/exif/all（切片按 CLS 实测维度自适应）")
     args = ap.parse_args()
 
     fps, X, metas = load_photos(args.m3, args.db, args.model_id)
@@ -306,7 +313,7 @@ def main() -> int:
     sd = X[tr_mask].std(axis=0)
     sd[sd == 0] = 1.0
     X = (X - mu) / sd
-    lo, hi = FEAT_SLICES[args.feat_group]
+    lo, hi = feat_slices(X.shape[1])[args.feat_group]
     X = X[:, lo:hi]
     print(f"特征 {X.shape}（train 标准化；model_id={args.model_id} · feat={args.feat_group}）")
 
