@@ -65,7 +65,7 @@
 5. 快照系综 0.744 无增益。
 
 **剩余杠杆（全在数据侧）**：
-- **金标准团内盲选**（台阶② 唯一出路，**等用户标注 ~20min**）：`D:/PhotoDB/dataset/golden_clusters/` 48 团 166 张匿名原图；读完答案跑 `audit/golden_cluster_eval.py` → 三重判决（标签噪声实测 / 模型 clean 首考 / CV 锐度零训练通路对照）。
+- **金标准团内盲选**（台阶② 唯一出路，**等用户标星**）：`D:/PhotoDB/dataset/golden_star/` 单文件夹 166 张（48 团，`G###_X.ext`，内嵌旧星已剥净）——用户直接标星，标完跑 `audit/golden_star_readback.py`（组内最高星=选择，并列/全 0=tie）再跑 `audit/golden_cluster_eval.py` → 三重判决（标签噪声实测 / 模型 clean 首考 / CV 锐度零训练通路对照）。
 - **数据飞轮**：新外拍事件回流（跨场泛化根本欠账 = 仅 7 个训练事件；E4 已示目标应是个人尺）。
 - **台阶① 可用性验收实验**（§10.11#7）：强/弱二分后人工复核率。
 
@@ -90,8 +90,8 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10 = 训练阶段总叙事 + §10.11 后续优化预留表**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 四轮证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden_cluster_sampler + golden_cluster_eval（B1 金标准盲选）** |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden_cluster_sampler + golden_star_export + golden_star_readback + golden_cluster_eval（B1 金标准盲选链）** |
 | `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估，变体开关全：--seed/--w-abs/--abs-min-d/--full-ft）** · **m8_ensemble.py（系综+三级台阶考卷，已固化）** · m6_adapt_sim.py（事件内适配验证） · m7_extprobe.py（CLIP+LAION 外部先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
 | `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** |
-| `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_clusters/（48 团金标准盲选集，待标注）** · models/（ONNX + LAION 头） |
+| `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_star/（48 团 166 张盲选集，标星工作流，待标注）** · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |
 | 关键数据资产 | `audit/out/m3_pairs/`（train 60180/val 1771/test 9542 + photos.csv） · `audit/out/abs_pairs/`（A1：train 20467/val 54/test 924） · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分） · `audit/out/clusters/clusters.csv`（2569 团） · `train/out/m8_best/`（当前最优系综产物） |
