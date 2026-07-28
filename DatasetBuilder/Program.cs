@@ -36,10 +36,10 @@ internal static class Program
         IngestManifest manifest;
         int? concurrencyOverride;
         bool scanOnly, noPatch;
-        string? modelFile, modelIdOverride;
+        string? modelFile, modelIdOverride, dumpRender;
         try
         {
-            (manifest, concurrencyOverride, scanOnly, modelFile, modelIdOverride, noPatch) = BuildManifest(args);
+            (manifest, concurrencyOverride, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender) = BuildManifest(args);
         }
         catch (Exception ex)
         {
@@ -59,6 +59,11 @@ internal static class Program
             ScanReport.Print(FingerprintGrouper.Scan(manifest.Folders));
             return 0;
         }
+
+        // 渲染缓存转储（梯4 LoRA 前置）：用与 DINO 预处理完全相同的解码+缩放路径，
+        // 把每组代表件渲成 <fingerprint>.png 训练缓存。不建库、不提特征、无 ONNX 会话。
+        if (dumpRender != null)
+            return RunDumpRender(manifest, dumpRender, concurrencyOverride);
 
         if ((modelFile == null) != (modelIdOverride == null))
         {
@@ -92,6 +97,89 @@ internal static class Program
         try { Dispatcher.UIThread.MainLoop(cts.Token); }
         catch (OperationCanceledException) { }
         return rc;
+    }
+
+    /// <summary>
+    /// --dump-render 入口：初始化 Avalonia（软件渲染）+ pump dispatcher（RenderTargetBitmap 渲染
+    /// 会向 UI 线程做往返，同主管线），后台线程跑 <see cref="DumpRenderAsync"/>。无 ONNX 会话，不悬挂。
+    /// </summary>
+    private static int RunDumpRender(IngestManifest manifest, string dir, int? concurrencyOverride)
+    {
+        AppBuilder.Configure<Application>()
+            .UsePlatformDetect()
+            .With(new Win32PlatformOptions { RenderingMode = new[] { Win32RenderingMode.Software } })
+            .SetupWithoutStarting();
+        int rc = 0;
+        var cts = new CancellationTokenSource();
+        _ = Task.Run(async () =>
+        {
+            try { rc = await DumpRenderAsync(manifest, dir, concurrencyOverride); }
+            catch (Exception ex) { Console.WriteLine($"[ERROR] {ex}"); rc = 3; }
+            finally { cts.Cancel(); }
+        });
+        try { Dispatcher.UIThread.MainLoop(cts.Token); }
+        catch (OperationCanceledException) { }
+        return rc;
+    }
+
+    /// <summary>
+    /// 逐指纹组把代表件按 DINO 输入口径渲染成 PNG 缓存（梯4 LoRA 训练/评估用）：
+    /// 与 <see cref="DinoFeatureExtractor.RenderInputBitmap"/> 同一解码+缩放路径，保证训练像素 ≡ 部署像素。
+    /// 幂等：已存在非空文件即跳过。
+    /// </summary>
+    private static async Task<int> DumpRenderAsync(IngestManifest manifest, string dir, int? concurrencyOverride)
+    {
+        Directory.CreateDirectory(dir);
+        Console.WriteLine("扫描 + 指纹聚合中…");
+        var groups = FingerprintGrouper.Scan(manifest.Folders);
+        Console.WriteLine($"{groups.Count} 指纹组 → 渲染 {DinoModelResources.InputSize}px PNG → {dir}");
+        int concurrency = concurrencyOverride ?? manifest.Concurrency ?? Math.Max(1, Environment.ProcessorCount / 2);
+        var sem = new SemaphoreSlim(concurrency);
+        int done = 0, skip = 0, fail = 0;
+        var tasks = groups.Select(g => Task.Run(async () =>
+        {
+            await sem.WaitAsync();
+            try
+            {
+                string path = Path.Combine(dir, g.Fingerprint + ".png");
+                if (File.Exists(path) && new FileInfo(path).Length > 0)
+                {
+                    Interlocked.Increment(ref skip);
+                    return;
+                }
+                if (!PhotoDecode.CanDecode(g.Representative.Path))
+                {
+                    Interlocked.Increment(ref fail);
+                    Console.WriteLine($"[FAIL] 不可解码: {g.Representative.RelPath}");
+                    return;
+                }
+                using var bitmap = PhotoDecode.LoadBitmap(g.Representative.Path);
+                if (bitmap == null)
+                {
+                    Interlocked.Increment(ref fail);
+                    Console.WriteLine($"[FAIL] 解码失败: {g.Representative.RelPath}");
+                    return;
+                }
+                using var rtb = DinoFeatureExtractor.RenderInputBitmap(bitmap);
+                using (var fs = File.Create(path))
+                    rtb.Save(fs);
+                int d = Interlocked.Increment(ref done);
+                if (d % 200 == 0 || d == groups.Count)
+                    Console.WriteLine($"  [{d}/{groups.Count}] 跳过 {skip} · 失败 {fail}");
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Increment(ref fail);
+                Console.WriteLine($"[FAIL] {g.Representative.RelPath}: {ex.Message}");
+            }
+            finally
+            {
+                sem.Release();
+            }
+        })).ToArray();
+        await Task.WhenAll(tasks);
+        Console.WriteLine($"DUMP GATE: done={done} skip={skip} fail={fail} / total={groups.Count}");
+        return fail == 0 ? 0 : 2;
     }
 
     /// <summary>核心流水线（在后台线程执行）：建库 → 写 meta → 扫描聚合 → 逐组四路提取 → 覆盖率报告 + GATE。</summary>
@@ -306,12 +394,13 @@ internal static class Program
         return (set, true);
     }
 
-    private static (IngestManifest, int?, bool, string?, string?, bool) BuildManifest(string[] args)
+    private static (IngestManifest, int?, bool, string?, string?, bool, string?) BuildManifest(string[] args)
     {
         string? manifestPath = null, dbPath = null;
         int? concurrency = null;
         bool noEnhance = false, scanOnly = false;
         string? modelFile = null, modelIdOverride = null; bool noPatch = false;
+        string? dumpRender = null;
         var folders = new List<string>();
 
         for (int i = 0; i < args.Length; i++)
@@ -326,6 +415,7 @@ internal static class Program
                 case "--model-file" when i + 1 < args.Length: modelFile = args[++i]; break;
                 case "--model-id" when i + 1 < args.Length: modelIdOverride = args[++i]; break;
                 case "--no-patch": noPatch = true; break;
+                case "--dump-render" when i + 1 < args.Length: dumpRender = args[++i]; break;
                 default:
                     if (!args[i].StartsWith("--")) folders.Add(args[i]);
                     break;
@@ -333,12 +423,12 @@ internal static class Program
         }
 
         if (manifestPath != null)
-            return (IngestManifest.Load(manifestPath), concurrency, scanOnly, modelFile, modelIdOverride, noPatch);
+            return (IngestManifest.Load(manifestPath), concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender);
 
-        // 快速模式：直接给文件夹 + --db，无标签。--scan-only 不写库，故不要求 --db。
+        // 快速模式：直接给文件夹 + --db，无标签。--scan-only / --dump-render 不写库，故不要求 --db。
         if (folders.Count == 0)
             throw new ArgumentException("需要 --manifest <路径>，或提供文件夹（+ --db <路径>，--scan-only 除外）。");
-        if (dbPath == null && !scanOnly)
+        if (dbPath == null && !scanOnly && dumpRender == null)
             throw new ArgumentException("快速模式需要 --db <数据集库路径>（或加 --scan-only 只看分布）。");
 
         var m = new IngestManifest
@@ -347,7 +437,7 @@ internal static class Program
             Enhance = new EnhanceOptions { Enabled = !noEnhance },
             Folders = folders.Select(f => new FolderEntry { Path = f, Recursive = true }).ToList(),
         };
-        return (m, concurrency, scanOnly, modelFile, modelIdOverride, noPatch);
+        return (m, concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender);
     }
 
     private static void PrintUsage()
@@ -367,5 +457,6 @@ internal static class Program
         Console.WriteLine("  --model-file <path> 升级梯实验：改用指定 ONNX 文件替代内置模型（须与 --model-id 成对）");
         Console.WriteLine("  --model-id <id>     升级梯实验：本批特征落库的 model_id（须与 --model-file 成对）");
         Console.WriteLine("  --no-patch          不提取 patch token（梯级探针只提双路 CLS，省 ~38GB）");
+        Console.WriteLine("  --dump-render <dir> 梯4 LoRA 前置：按 DINO 输入口径把每组代表件渲成 <fingerprint>.png 缓存（不建库、不提特征）");
     }
 }
