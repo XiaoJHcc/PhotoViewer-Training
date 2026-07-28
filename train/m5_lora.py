@@ -17,6 +17,11 @@ backbone 本身（LoRA 注入每层 attention q/k/v/o_proj），用 M3 训练对
 用法（仓根 D:/Git/PhotoViewer 下）：
     PYTHONUTF8=1 Tools/.venv-gpu/Scripts/python.exe Training/train/m5_lora.py --smoke
     PYTHONUTF8=1 Tools/.venv-gpu/Scripts/python.exe Training/train/m5_lora.py --epochs 3
+
+2026-07-28 增量臂（A1/A2/A3，见 docs/agent-handover.md §5 预留表）：
+    --w-abs 1.0        A1：盲评绝对对（audit/out/abs_pairs，~2 万对胜者在前）入训
+    --seed 1           A2：多种子（默认 0）
+    --full-ft --lr-full 1e-5   A3：全量微调容量臂（不注 LoRA）
 """
 from __future__ import annotations
 
@@ -95,8 +100,9 @@ class PatchHead:
 HEADS = {"cls": ClsHead, "patch": PatchHead}
 
 
-def build_model(mid: str, device: str, head_kind: str = "cls"):
-    """冻结 backbone + 注入 LoRA + 评分头。返回 (model, head, lora_params)。"""
+def build_model(mid: str, device: str, head_kind: str = "cls", full_ft: bool = False):
+    """冻结 backbone + 注入 LoRA + 评分头。返回 (model, head, trainable_params)。
+    full_ft=True 时不注 LoRA、整网放训（A3 容量臂）。"""
     import torch
     from torch import nn
     from transformers import AutoModel
@@ -130,19 +136,24 @@ def build_model(mid: str, device: str, head_kind: str = "cls"):
             setattr(mod, last, new)
 
     n_inj = 0
-    for name, mod in list(model.named_modules()):
-        if name.endswith(LORA_TARGETS) and isinstance(mod, nn.Linear):
-            set_submodule(model, name, LoRALinear(mod))
-            n_inj += 1
-    assert n_inj == 48, f"LoRA 注入点 {n_inj} != 48（12 层 × 4 proj）"
+    if not full_ft:
+        for name, mod in list(model.named_modules()):
+            if name.endswith(LORA_TARGETS) and isinstance(mod, nn.Linear):
+                set_submodule(model, name, LoRALinear(mod))
+                n_inj += 1
+        assert n_inj == 48, f"LoRA 注入点 {n_inj} != 48（12 层 × 4 proj）"
+    else:
+        for p in model.parameters():
+            p.requires_grad_(True)
     n_reg = int(getattr(model.config, "num_register_tokens", 4))
     head = HEADS[head_kind].build(model.config.hidden_size, n_reg)
     model.to(device)
     head.to(device)
-    lora_params = [p for n, p in model.named_parameters() if p.requires_grad]
-    print(f"LoRA 注入 {n_inj} 处；可训参数 LoRA {sum(p.numel() for p in lora_params)} + "
+    trainable = [p for n, p in model.named_parameters() if p.requires_grad]
+    print(f"{'全量微调' if full_ft else f'LoRA 注入 {n_inj} 处'}；可训参数 "
+          f"backbone {sum(p.numel() for p in trainable)} + "
           f"头({head_kind}) {sum(p.numel() for p in head.parameters())}", flush=True)
-    return model, head, lora_params
+    return model, head, trainable
 
 
 def forward_scores(model, head, x):
@@ -316,15 +327,23 @@ def main() -> int:
     ap.add_argument("--tie-loss", type=float, default=0.0, help="E3：团等价辅助损失权重 λ（0=关）")
     ap.add_argument("--clean-top", action="store_true", help="E5：window 对只留两端皆团顶/孤立照（干净监督）")
     ap.add_argument("--any-top", action="store_true", help="E6：window 对只留至少一端团顶（剔双落败者/双非顶）")
+    ap.add_argument("--seed", type=int, default=SEED, help="A2 多种子臂：torch/np/loader 种子")
+    ap.add_argument("--w-abs", type=float, default=0.0,
+                    help="A1：盲评绝对对权重乘子（0=关；载入 audit/out/abs_pairs/pairs_train.csv）")
+    ap.add_argument("--abs-min-d", type=int, default=1,
+                    help="A1：abs 对最小 |Δrating|（2=只留硬差异区，舍入噪声对不入训）")
+    ap.add_argument("--abs-pairs", default=str(Path(__file__).resolve().parent.parent / "audit" / "out" / "abs_pairs"))
+    ap.add_argument("--full-ft", action="store_true", help="A3 容量臂：不注 LoRA，整网放训")
+    ap.add_argument("--lr-full", type=float, default=1e-5, help="全量微调 backbone 学习率")
     ap.add_argument("--smoke", action="store_true", help="512 对 × 30 步冒烟，不评估")
     args = ap.parse_args()
 
     import torch
     from torch.utils.data import DataLoader
-    torch.manual_seed(SEED)
-    np.random.seed(SEED)
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"device={device} torch={torch.__version__}", flush=True)
+    print(f"device={device} torch={torch.__version__} seed={args.seed}", flush=True)
 
     # 元数据与对（与 m4 同口径；X 特征不用，只为 fps/metas 顺序与过滤语义）
     fps, _X, metas = load_photos(args.m3, "D:/PhotoDB/dataset/photos_dataset.db",
@@ -385,13 +404,30 @@ def main() -> int:
         tie_pairs = tie_pairs[:20000]
         pairs_tr = pairs_tr + tie_pairs
         print(f"E3 团等价辅助: {len(tie_pairs)} 对 tie（λ={args.tie_loss}）", flush=True)
+    # A1 盲评绝对对（第五监督源）：胜者在前 y=+1，权重已含 Δ=1 ×0.5，再乘 --w-abs
+    if args.w_abs > 0:
+        abs_tr = []
+        for r in csv.DictReader(open(f"{args.abs_pairs}/pairs_train.csv", encoding="utf-8-sig")):
+            if int(r["dstar"]) < args.abs_min_d:
+                continue
+            if r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp:
+                abs_tr.append((r["fp_i"], r["fp_j"], 1, float(r["weight"]) * args.w_abs,
+                               "abs", int(r["dstar"])))
+        pairs_tr = pairs_tr + abs_tr
+        print(f"A1 盲评绝对对: {len(abs_tr)} 对（Δ≥{args.abs_min_d}）×w{args.w_abs} 入训", flush=True)
     print(f"对: train {len(pairs_tr)} · val {len(pairs_va)} · test {len(pairs_te)}", flush=True)
 
-    model, head, lora_params = build_model(args.mid, device, args.head)
-    opt = torch.optim.AdamW([
-        {"params": lora_params, "lr": LR_LORA},
-        {"params": head.parameters(), "lr": LR_HEAD},
-    ], weight_decay=0.0)
+    model, head, trainable = build_model(args.mid, device, args.head, args.full_ft)
+    if args.full_ft:
+        opt = torch.optim.AdamW([
+            {"params": trainable, "lr": args.lr_full},
+            {"params": head.parameters(), "lr": LR_HEAD},
+        ], weight_decay=0.0)
+    else:
+        opt = torch.optim.AdamW([
+            {"params": trainable, "lr": LR_LORA},
+            {"params": head.parameters(), "lr": LR_HEAD},
+        ], weight_decay=0.0)
 
     mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
@@ -436,7 +472,7 @@ def main() -> int:
         print(f"SMOKE OK peak VRAM {torch.cuda.max_memory_allocated() / 2**30:.1f}GB", flush=True)
         return 0
 
-    g = torch.Generator().manual_seed(SEED)
+    g = torch.Generator().manual_seed(args.seed)
     loader = DataLoader(PairDataset(pairs_tr, args.cache), batch_size=args.batch_pairs,
                         shuffle=True, num_workers=args.workers, generator=g,
                         collate_fn=PairCollate(args.cache), pin_memory=True,
@@ -444,9 +480,11 @@ def main() -> int:
     pairs_tr_eval = [p for p in pairs_tr if p[4] != "tie"]   # tie 对只进损失，不进指标
 
     history = []
+    mode = f"全量微调 lr={args.lr_full}" if args.full_ft else \
+        f"LoRA r={LORA_R} α={LORA_ALPHA} drop={LORA_DROP} lr={LR_LORA}"
     report = ["# 梯4 LoRA 微调报告（决策 8 最终逃生梯）\n",
-              f"LoRA r={LORA_R} α={LORA_ALPHA} drop={LORA_DROP} 目标={LORA_TARGETS}；"
-              f"batch {args.batch_pairs} 对；lr {LR_LORA}/{LR_HEAD}；固定 {args.epochs} epoch 不早停\n"]
+              f"{mode}；头 lr={LR_HEAD}；batch {args.batch_pairs} 对；固定 {args.epochs} epoch 不早停；"
+              f"seed={args.seed} · w_abs={args.w_abs} · head={args.head}\n"]
     for ep in range(1, args.epochs + 1):
         model.train()
         head.train()
@@ -487,9 +525,13 @@ def main() -> int:
         print(f"ep{ep} loss {row['loss']:.4f} | test top1 {row['test_top1']:.3f} "
               f"rho {row['test_rho']:.3f} recall {row['test_recall_ev']:.3f}", flush=True)
 
-        torch.save({"lora": {n: p for n, p in model.state_dict().items()
-                             if "lora" in n.lower() or (".A." in n or ".B." in n)},
-                    "head": head.state_dict()}, out / f"ckpt_ep{ep}.pt")
+        if args.full_ft:
+            torch.save({"model": model.state_dict(), "head": head.state_dict()},
+                       out / f"ckpt_ep{ep}.pt")
+        else:
+            torch.save({"lora": {n: p for n, p in model.state_dict().items()
+                                 if "lora" in n.lower() or (".A." in n or ".B." in n)},
+                        "head": head.state_dict()}, out / f"ckpt_ep{ep}.pt")
         with open(out / f"scores_ep{ep}.csv", "w", newline="", encoding="utf-8") as f:
             wr = csv.writer(f)
             wr.writerow(["fingerprint", "event", "seg_id", "split", "rating", "score"])

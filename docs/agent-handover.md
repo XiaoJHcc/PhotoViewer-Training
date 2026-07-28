@@ -1,7 +1,7 @@
 # 交接文档 — DINOv3 照片美学评分（给下一位 Agent）
 
 > **用途**：让接手者在 15 分钟内弄清这个项目的前后因果、当前位置与下一步。阅读顺序：本文 → [../STATUS.md](../STATUS.md)（机器真源·当前进度）→ [analysis-story.md](analysis-story.md)（人读叙事版，**§10 是训练阶段总叙事**）→ [../EXECUTION-LOG.md](../EXECUTION-LOG.md)（证据链台账，append-only）→ [transfer-failure-analysis.md](transfer-failure-analysis.md)（失败矩阵详尽版）。
-> **维护**：重大阶段交接时重写；本文版本 = 2026-07-27（训练阶段封板：梯4 LoRA + 13 实验打完，台阶① 站住 0.755）。
+> **维护**：重大阶段交接时重写；本文版本 = 2026-07-28（提精度专项封板：模型侧空间全关，台阶① 终点 0.766；剩余杠杆全在数据侧）。
 
 ---
 
@@ -46,22 +46,30 @@
 | 监督变体：derived 主 / 相似带专注(E2) / 团等价(E3) / 双团顶(E5) / 至少一端团顶(E6) | 全变差或持平——**全量原配比即最好**（脏对承载数据量+正则；window 对 55% 是"同团双落败者"） | — |
 | 外部美学先验（CLIP-L/14+LAION，E4） | **通用美学尺与个人判断几乎不相关** | 全带贴 chance、seg-rho -0.06 |
 | 系综（仅粗尺有效） | top-1/召回不动 | 仅 derived 0.676 |
+| 多种子 LoRA 扩系综（2026-07-28） | **种子方差 ±6pt**（0.551/0.563/0.675）；加种子 = 稀释幸运成员 | E6 0.701 < 0.755；纯三种子 0.615 |
+| 全量微调臂（2026-07-28） | 容量非约束 | 单体 0.596，系综无增益 |
+| 405 盲评直督 ×w1/w3/w0.3（2026-07-28） | 318 张独立照片瓶颈（对数≠多样性）；高权干扰单体 | 单体 0.58-0.60；w0.3 自家考卷 0.488 |
+| val 贪心系综加权（2026-07-28） | val 单事件太薄，不具系综排序能力 | search 选 laion+l518 → test 0.684 |
+| 同 run 快照系综（2026-07-28） | 快照相关性过高 | 0.744 无增益 |
 | Python 复刻渲染管线 | 解码/缩放实现差异 → 特征余弦仅 0.90 | **渲染正路 = C# `--dump-render`** |
 
-## 5. 当前位置与接下来（2026-07-27）
+## 5. 当前位置与接下来（2026-07-28 更新）
 
-**当前最优形态（可复现）**：系综 = `m5_lora`(ep3) + `m5_lora_patch`(ep3) + `m7_extprobe`(LAION) + `m4_l518_cls2`，各分数 z-score 后均权。产物在 `Training/train/out/`（gitignore，不入库；scores.csv 可重算/复用）。
+**当前最优形态（可复现）**：系综 = `m5_lora`(ep1) + `m5_lora_patch`(ep3) + `m7_extprobe`(LAION) + `m4_l518_cls2`，各分数 z-score 后均权；**台阶① derived dstar==2 = 0.766**（配方带 0.755-0.766 随 lora epoch）。产物 `Training/train/out/m8_best/`；**考卷已固化 = `Training/train/m8_ensemble.py`**（任意 scores.csv 组合的三级台阶 + abs 直考；基线复现验证 PASS）。
 
-**后续推荐方向（analysis-story §10.11 预留表，按预期值排序，结果栏待填）**：
-1. **多种子 LoRA 扩系综**（3-5 种子投票，~1-2h，预期台阶① +1-2pt）；
-2. **全量微调臂**（不 LoRA、整网放训，~1h，判定容量是否约束）；
-3. **405 张盲评绝对标签作第五监督源**（abs_set 200 + m2_pool 205，最纯的个人尺；注意 test/val 事件内的要剔除防泄）；
-4. 系综加权优化（非均权/堆叠）；
-5. **金标准集团内人工盲选标注**（台阶② 换 ground truth 的唯一出路——这是**用户的活**：从 test 事件取连拍团、盲选哪张好）；
-6. **数据飞轮**：新外拍事件回流（跨场泛化的根本欠账 = 仅 7 个训练事件；E4 已示目标应是个人尺非通用尺）；
-7. 台阶① 可用性验收实验（强/弱二分后看人工复核率，把 0.755 从数字变成可信证据）。
+**2026-07-28 模型侧封板（§10.11 #1-4 + 快照系综全部关闭）**：
+1. **多种子证伪**——**种子方差 ±6pt**（同配置 LoRA 单体 0.551/0.563/0.675）；多种子 = 稀释幸运成员（E6 0.701 < 0.755）。**历史所有单体 LoRA 数字按 ±6pt 噪声带判读。**
+2. **全量微调关闭**——单体 0.596，容量非约束。
+3. **405 盲评直督三臂证伪**——318 张独立照片是瓶颈（对数不构成多样性）；w1/w3 干扰单体，w0.3 温和锚自家考卷 0.488；405 库存下天花板已见。数据资产可复用：`audit/out/abs_pairs/`（train 20467 / test 924 / val 54；**abs test 对 = 最贴"用户的尺"的考卷**）。
+4. **系综加权证伪**——val 单事件太薄不能做系综选择（search 选出 laion+l518，test 仅 0.684）。
+5. 快照系综 0.744 无增益。
 
-**判读纪律**：val 近 chance 时早停不可靠——固定 epoch 预算或多种子、报逐轮轨迹；主指标组 = 段内 top-1 + seg-rho + Δ≥2 对级 + recall@12.5% + cos 分层（相似带）+ 三级台阶口径；abs 涌现 n 小仅方向参考。
+**剩余杠杆（全在数据侧）**：
+- **金标准团内盲选**（台阶② 唯一出路，**等用户标注 ~20min**）：`D:/PhotoDB/dataset/golden_clusters/` 48 团 166 张匿名原图；读完答案跑 `audit/golden_cluster_eval.py` → 三重判决（标签噪声实测 / 模型 clean 首考 / CV 锐度零训练通路对照）。
+- **数据飞轮**：新外拍事件回流（跨场泛化根本欠账 = 仅 7 个训练事件；E4 已示目标应是个人尺）。
+- **台阶① 可用性验收实验**（§10.11#7）：强/弱二分后人工复核率。
+
+**判读纪律**：val 近 chance 时早停不可靠——固定 epoch 预算或多种子、报逐轮轨迹；**单体 LoRA 数字按 ±6pt 种子噪声带判读**；主指标组 = 段内 top-1 + seg-rho + Δ≥2 对级 + recall@12.5% + cos 分层（相似带）+ 三级台阶口径（m8_ensemble）；abs 涌现 n 小仅方向参考。
 
 ## 6. 工程守则（踩过的坑，别再踩）
 
@@ -82,8 +90,8 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10 = 训练阶段总叙事 + §10.11 后续优化预留表**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 四轮证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen |
-| `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估，变体开关全）** · m6_adapt_sim.py（事件内适配验证） · m7_extprobe.py（CLIP+LAION 外部先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden_cluster_sampler + golden_cluster_eval（B1 金标准盲选）** |
+| `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估，变体开关全：--seed/--w-abs/--abs-min-d/--full-ft）** · **m8_ensemble.py（系综+三级台阶考卷，已固化）** · m6_adapt_sim.py（事件内适配验证） · m7_extprobe.py（CLIP+LAION 外部先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
 | `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** |
-| `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · models/（ONNX + LAION 头） |
-| 关键数据资产 | `audit/out/m3_pairs/`（train 60180/val 1771/test 9542 + photos.csv） · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分） · `audit/out/clusters/clusters.csv`（2569 团） |
+| `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_clusters/（48 团金标准盲选集，待标注）** · models/（ONNX + LAION 头） |
+| 关键数据资产 | `audit/out/m3_pairs/`（train 60180/val 1771/test 9542 + photos.csv） · `audit/out/abs_pairs/`（A1：train 20467/val 54/test 924） · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分） · `audit/out/clusters/clusters.csv`（2569 团） · `train/out/m8_best/`（当前最优系综产物） |
