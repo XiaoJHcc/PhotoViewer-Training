@@ -30,7 +30,7 @@ KEY = GC_DIR / "golden_clusters_key.csv"
 
 PAT_ELEM = re.compile(rb"<xmp:Rating>([-0-9]+)</xmp:Rating>")
 PAT_ATTR = re.compile(rb'xmp:Rating="([-0-9]+)"')
-PAT_NAME = re.compile(r"^(G\d{3})_([A-F])\.[^.]+$")
+PAT_NAME = re.compile(r"^([GH]\d{3})_([A-F])\.[^.]+$")
 
 
 def read_rating(path: Path) -> int:
@@ -55,12 +55,20 @@ def read_rating(path: Path) -> int:
 
 
 def main() -> int:
-    key = list(csv.DictReader(open(KEY, encoding="utf-8-sig")))
+    import argparse
+    ap = argparse.ArgumentParser(description="标星读回：组内最高星 = 用户选择")
+    ap.add_argument("--star-dir", default=str(STAR_DIR), help="标星文件夹（批1 golden_star / 批2 golden_star2）")
+    ap.add_argument("--key", default=str(KEY), help="真值键 csv（批1 golden_clusters_key / 批2 golden_batch2_key）")
+    ap.add_argument("--out-answers", default=str(GC_DIR / "golden_clusters_answers.tsv"))
+    args = ap.parse_args()
+    star_dir, key_path, out_answers = Path(args.star_dir), Path(args.key), Path(args.out_answers)
+
+    key = list(csv.DictReader(open(key_path, encoding="utf-8-sig")))
     slots = {(r["gid"], r["anon"]): r for r in key}
 
     stars = {}            # (gid, anon) -> user star
     seen = set()
-    for f in sorted(STAR_DIR.iterdir()):
+    for f in sorted(star_dir.iterdir()):
         m = PAT_NAME.match(f.name)
         if not m or f.suffix.lower() == ".xmp":
             continue
@@ -99,13 +107,13 @@ def main() -> int:
                              is_user_pick=int(ans == a or (ans == "tie" and ust == top and top > 0)),
                              group_status=status))
 
-    with open(STAR_DIR / "golden_star_readback.tsv", "w", encoding="utf-8") as f:
+    with open(star_dir / "golden_star_readback.tsv", "w", encoding="utf-8") as f:
         f.write("gid\tanon\tfingerprint\tuser_star\torig_rating\tis_orig_top\tis_user_pick\tgroup_status\n")
         for r in rows:
             f.write("\t".join(str(r[c]) for c in
                               ("gid", "anon", "fingerprint", "user_star", "orig_rating",
                                "is_orig_top", "is_user_pick", "group_status")) + "\n")
-    with open(GC_DIR / "golden_clusters_answers.tsv", "w", encoding="utf-8") as f:
+    with open(out_answers, "w", encoding="utf-8") as f:
         f.write("# 每行一团：winner 填 A/B/...（最好的那张）；真判不出填 tie\n")
         f.write("gid\twinner\n")
         for gid in sorted(answers):
@@ -117,7 +125,7 @@ def main() -> int:
         print("  （远低于 1 = 坐实团内核级标签为压低+舍入产物；≈1 = 锦标赛团内标签其实干净）")
     dist = Counter(v for v in stars.values())
     print(f"用户星级分布: {dict(sorted(dist.items()))}")
-    print(f"\n[OK] 明细 {STAR_DIR / 'golden_star_readback.tsv'} + 答卷已生成")
+    print(f"\n[OK] 明细 {star_dir / 'golden_star_readback.tsv'} + 答卷 {out_answers}")
     print("下一步：PYTHONUTF8=1 Tools/.venv/Scripts/python.exe Training/audit/golden_cluster_eval.py "
           "--scores ens=Training/train/out/m8_best/scores_ens.csv")
     return 0
