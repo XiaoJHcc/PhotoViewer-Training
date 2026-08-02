@@ -49,6 +49,8 @@
 | 多种子 LoRA 扩系综（2026-07-28） | **种子方差 ±6pt**（0.551/0.563/0.675）；加种子 = 稀释幸运成员 | E6 0.701 < 0.755；纯三种子 0.615 |
 | 全量微调臂（2026-07-28） | 容量非约束 | 单体 0.596，系综无增益 |
 | 405 盲评直督 ×w1/w3/w0.3（2026-07-28） | 318 张独立照片瓶颈（对数≠多样性）；高权干扰单体 | 单体 0.58-0.60；w0.3 自家考卷 0.488 |
+| golden 干净对 ×20 LoRA 双臂（2026-08-02） | 靶区学得进、全局必扭曲（LoRA 更新=扭曲载体） | R1 ≤1 0.80 / R2 0.76（vs ens 0.88） |
+| 冻 backbone 只训头（2026-08-02） | 无扭曲通道=也无学习 | 平台=冻结骨干（0.86/0.92） |
 | val 贪心系综加权（2026-07-28） | val 单事件太薄，不具系综排序能力 | search 选 laion+l518 → test 0.684 |
 | 同 run 快照系综（2026-07-28） | 快照相关性过高 | 0.744 无增益 |
 | Python 复刻渲染管线 | 解码/缩放实现差异 → 特征余弦仅 0.90 | **渲染正路 = C# `--dump-render`** |
@@ -65,11 +67,11 @@
 5. 快照系综 0.744 无增益。
 
 **剩余杠杆（全在数据侧）**：
-**台阶② 现状（2026-07-28 用户容差重估）**：48 团 test 考卷已立（`golden_star/` 标星工作流，166 张）——**旧团顶一致率 0.732，团内旧标签作 ground truth 作废**；**正确口径 = 用户尺前二命中：系综 0.90（好片带 0.95），顶1 0.46 为副指标**；真模型错误仅 4/41（G005/G009/G013/G020）；不稳定集中茶博（0.44，差中选差），G026 极相似 tie 区实证（cos 0.978）。**下一步 = train 侧第二批标注（~100 团，加密极相似带）：扩考卷（n=41 薄）+ 修残余硬错误 + 提顶 1 决断力；48 团永久不入训**。工具链：`golden_star_export.py`（导出+剥星）/ `golden_star_readback.py`（读回）/ `golden_cluster_eval.py`（判决）。**纪律：组内标星 = 组内排序，禁止任何跨组数值比较；"差"的定义走 200 张横评事件级绝对尺。**
+**台阶② 现状（2026-08-02 封板）**：合并考卷 `golden_exam/`（73 团 59 判定组，批1 48 + 批2 test 25，永久不入训；评估器 `audit/golden_exam_eval.py` 四层剖面）——**ens 守擂 exact 0.47 / ≤1 0.88 / 前二 0.93**。改进三臂全灭：R1 cls+golden×20（靶区增益 vs 全局重伤）、R2 cvfuse+golden×20（全局同伤；**极相似带 ep2 ≤1=1.00/硬错误 0——CV 通道实证，用户"分块对齐"指导兑现**）、R3 冻 backbone 只训头（无损伤无学习）——**困境三连实证：LoRA 适配必扭曲、冻结学不进；干净标签有效（325 对 `audit/out/golden_pairs/`，确信度加权），缺不扭曲交付机制，当前数据规模无解**。**反转杠杆 = 干净标注规模上量（数据飞轮，数千对后重训）+ 水平度 CV（用户指出的未来信号，~0.5° 级）**。标准定稿：草案 0.50/0.95/0.05/0 为目标，参照系=本考卷。工具链：`golden_exam_merge.py` / `golden_exam_eval.py` / `golden_pair_gen.py` / `golden_batch2_sampler.py` / `golden_star_readback.py`；m5 新增 `--head cvfuse` / `--init-from` / `--freeze-all` / `--w-golden`。**教训：训练在飞时禁改 m5_lora.py（spawn worker 重载崩毁 R1 首跑）。**
 - **数据飞轮**：新外拍事件回流（跨场泛化根本欠账 = 仅 7 个训练事件；E4 已示目标应是个人尺）。
 - **台阶① 可用性验收实验**（§10.11#7）：强/弱二分后人工复核率。
 
-**判读纪律**：val 近 chance 时早停不可靠——固定 epoch 预算或多种子、报逐轮轨迹；**单体 LoRA 数字按 ±6pt 种子噪声带判读**；主指标组 = 段内 top-1 + seg-rho + Δ≥2 对级 + recall@12.5% + cos 分层（相似带）+ 三级台阶口径（m8_ensemble）；abs 涌现 n 小仅方向参考。
+**判读纪律**：val 近 chance 时早停不可靠——固定 epoch 预算或多种子、报逐轮轨迹；**单体 LoRA 数字按 ±6pt 种子噪声带判读**；**组内标星 = 组内排序，禁止任何跨组数值比较（用户 07-28 训诫）；"差"的定义走 200 张横评事件级绝对尺**；主指标组 = 段内 top-1 + seg-rho + Δ≥2 对级 + recall@12.5% + cos 分层（相似带）+ 三级台阶口径（m8_ensemble）+ 金标准四层剖面（golden_exam_eval）；abs 涌现 n 小仅方向参考。
 
 ## 6. 工程守则（踩过的坑，别再踩）
 
@@ -90,7 +92,7 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10 = 训练阶段总叙事 + §10.11 后续优化预留表**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 四轮证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden_cluster_sampler + golden_star_export + golden_star_readback + golden_cluster_eval（B1 金标准盲选链）** |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback/cluster_eval/batch2_sampler/exam_merge/exam_eval/pair_gen——金标准全链）** |
 | `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估，变体开关全：--seed/--w-abs/--abs-min-d/--full-ft）** · **m8_ensemble.py（系综+三级台阶考卷，已固化）** · m6_adapt_sim.py（事件内适配验证） · m7_extprobe.py（CLIP+LAION 外部先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
 | `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** |
 | `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_star/（48 团 166 张盲选集，标星工作流，待标注）** · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |

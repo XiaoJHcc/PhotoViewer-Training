@@ -97,7 +97,39 @@ class PatchHead:
         return _H()
 
 
-HEADS = {"cls": ClsHead, "patch": PatchHead}
+class CvFuseHead:
+    """头 v3（DINO×CV 分块融合，用户 2026-07-28 指导）：patch token 与 CV 网格
+    空间对齐（皆 32×32 全画面均匀采样），逐格拼接 CV 投影后残差融合，注意力池化。
+    让模型自己学"哪块的模糊/锐度该影响分数"（如主体锐度 vs 天然变化区），
+    不做 CV 特判硬规则。cv 输入 [B,8,1024]：7 标量（NaN→0）+ 1 逐格 NaN 比例掩码。"""
+
+    @staticmethod
+    def build(dim, n_reg):
+        import torch
+        from torch import nn
+
+        class _H(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.cv_proj = nn.Linear(8, 64)
+                self.fuse = nn.Linear(dim + 64, dim)
+                self.q = nn.Parameter(torch.randn(dim) * 0.02)
+                self.lin = nn.Linear(dim * 2, 1)
+                self.n_reg = n_reg
+
+            def forward(self, h, cv):
+                cls = h[:, 0, :]
+                patch = h[:, 1 + self.n_reg:, :]                    # [B,1024,dim]
+                c = self.cv_proj(cv.transpose(1, 2))                # [B,1024,64]
+                fused = patch + self.fuse(torch.cat([patch, c], -1))
+                w = torch.softmax(torch.einsum("btd,d->bt", fused, self.q) / dim ** 0.5, dim=1)
+                pooled = torch.einsum("bt,btd->bd", w, fused)
+                return self.lin(torch.cat([cls, pooled], -1)).squeeze(-1)
+        return _H()
+
+
+HEADS = {"cls": ClsHead, "patch": PatchHead, "cvfuse": CvFuseHead}
+CV_HEADS = {"cvfuse"}                     # 需要 CV 网格输入的头
 
 
 def build_model(mid: str, device: str, head_kind: str = "cls", full_ft: bool = False):
@@ -156,9 +188,11 @@ def build_model(mid: str, device: str, head_kind: str = "cls", full_ft: bool = F
     return model, head, trainable
 
 
-def forward_scores(model, head, x):
-    """x: [B,3,518,518] 已归一化 → [B] 分数。"""
+def forward_scores(model, head, x, cv=None):
+    """x: [B,3,518,518] 已归一化 → [B] 分数。cv（cvfuse 头）: [B,8,1024]。"""
     h = model(pixel_values=x).last_hidden_state
+    if cv is not None:
+        return head(h.float(), cv.float())
     return head(h.float())
 
 
@@ -186,17 +220,23 @@ def _load_img(cache, fp):
 
 
 class PairCollate:
-    """顶层可调用类（Windows spawn worker 须可 pickle）。返回 [2B,H,W,3] uint8 + y + w。"""
+    """顶层可调用类（Windows spawn worker 须可 pickle）。返回 [2B,H,W,3] uint8 + y + w
+    （cv 字典非 None 时再附 [2B,8,1024] CV 网格）。"""
 
-    def __init__(self, cache):
+    def __init__(self, cache, cv_of=None):
         self.cache = cache
+        self.cv_of = cv_of
 
     def __call__(self, items):
         import torch
         fi, fj, y, w = zip(*items)
         imgs = [_load_img(self.cache, f) for f in (*fi, *fj)]
         x = torch.from_numpy(np.stack(imgs))            # 前 B = i，后 B = j
-        return x, torch.tensor(y, dtype=torch.float32), torch.tensor(w, dtype=torch.float32)
+        y_t, w_t = torch.tensor(y, dtype=torch.float32), torch.tensor(w, dtype=torch.float32)
+        if self.cv_of is not None:
+            cv = torch.from_numpy(np.stack([self.cv_of[f] for f in (*fi, *fj)]))
+            return x, y_t, w_t, cv
+        return x, y_t, w_t
 
 
 class FpDataset:
@@ -211,21 +251,49 @@ class FpDataset:
 
 
 class FpCollate:
-    def __init__(self, cache):
+    def __init__(self, cache, cv_of=None):
         self.cache = cache
+        self.cv_of = cv_of
 
     def __call__(self, items):
         import torch
-        return torch.from_numpy(np.stack([_load_img(self.cache, f) for f in items]))
+        x = torch.from_numpy(np.stack([_load_img(self.cache, f) for f in items]))
+        if self.cv_of is not None:
+            return x, torch.from_numpy(np.stack([self.cv_of[f] for f in items]))
+        return x
 
 
-def score_all(model, head, fps, cache, device, batch=64):
+def load_cv_grids(db, fps):
+    """fp → [8,1024] float32（7 标量 NaN→0 + 逐格 NaN 比例掩码）；缺网格给全 0 + 掩码 1。"""
+    import sqlite3
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "probes"))
+    from feature_probe import CV_PLANE_LEN, CV_SCALAR_COUNT
+    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+    try:
+        raw = {fp: blob for fp, blob in conn.execute("SELECT fingerprint, cv_grid FROM photos")}
+    finally:
+        conn.close()
+    out = {}
+    for fp in fps:
+        blob = raw.get(fp)
+        arr = np.frombuffer(blob, dtype="<f4") if blob is not None else None
+        if arr is None or arr.size != CV_SCALAR_COUNT * CV_PLANE_LEN:
+            out[fp] = np.concatenate([np.zeros((7, CV_PLANE_LEN), np.float32),
+                                      np.ones((1, CV_PLANE_LEN), np.float32)])
+            continue
+        grid = arr.reshape(CV_SCALAR_COUNT, CV_PLANE_LEN).astype(np.float32)
+        mask = np.isnan(grid).mean(axis=0, keepdims=True).astype(np.float32)
+        out[fp] = np.concatenate([np.nan_to_num(grid, nan=0.0), mask])
+    return out
+
+
+def score_all(model, head, fps, cache, device, batch=64, cv_of=None):
     """全库打分（inference，bf16）→ np.array，与 fps 同序。"""
     import torch
     from torch.utils.data import DataLoader
 
     loader = DataLoader(FpDataset(fps), batch_size=batch, shuffle=False, num_workers=6,
-                        collate_fn=FpCollate(cache), pin_memory=True, persistent_workers=True)
+                        collate_fn=FpCollate(cache, cv_of), pin_memory=True, persistent_workers=True)
     mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
     out = np.zeros(len(fps), dtype=np.float32)
@@ -233,10 +301,15 @@ def score_all(model, head, fps, cache, device, batch=64):
     model.eval()
     head.eval()
     with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
-        for x in loader:
+        for blob in loader:
+            if cv_of is not None:
+                x, cv = blob
+                cv = cv.to(device, non_blocking=True)
+            else:
+                x, cv = blob, None
             x = x.to(device, non_blocking=True).permute(0, 3, 1, 2).float().div_(255.0)
             x = (x - mean) / std
-            s = forward_scores(model, head, x)
+            s = forward_scores(model, head, x, cv)
             out[ix:ix + len(s)] = s.float().cpu().numpy()
             ix += len(s)
     return out
@@ -332,9 +405,16 @@ def main() -> int:
                     help="A1：盲评绝对对权重乘子（0=关；载入 audit/out/abs_pairs/pairs_train.csv）")
     ap.add_argument("--abs-min-d", type=int, default=1,
                     help="A1：abs 对最小 |Δrating|（2=只留硬差异区，舍入噪声对不入训）")
+    ap.add_argument("--w-golden", type=float, default=0.0,
+                    help="金标准批2 干净团内对权重乘子（0=关；载入 audit/out/golden_pairs/pairs_train.csv）")
+    ap.add_argument("--golden-pairs",
+                    default=str(Path(__file__).resolve().parent.parent / "audit" / "out" / "golden_pairs"))
     ap.add_argument("--abs-pairs", default=str(Path(__file__).resolve().parent.parent / "audit" / "out" / "abs_pairs"))
     ap.add_argument("--full-ft", action="store_true", help="A3 容量臂：不注 LoRA，整网放训")
     ap.add_argument("--lr-full", type=float, default=1e-5, help="全量微调 backbone 学习率")
+    ap.add_argument("--init-from", default=None, help="从 ckpt 初始化 LoRA 权重（如 m5_lora/ckpt_ep1.pt）")
+    ap.add_argument("--freeze-all", action="store_true",
+                    help="冻结 backbone+LoRA 只训头（防小样本集扭曲全局特征的交付机制）")
     ap.add_argument("--smoke", action="store_true", help="512 对 × 30 步冒烟，不评估")
     args = ap.parse_args()
 
@@ -415,19 +495,38 @@ def main() -> int:
                                "abs", int(r["dstar"])))
         pairs_tr = pairs_tr + abs_tr
         print(f"A1 盲评绝对对: {len(abs_tr)} 对（Δ≥{args.abs_min_d}）×w{args.w_abs} 入训", flush=True)
+    # 金标准批2 干净团内对（用户盲评，确信度已加权进 weight，再乘 --w-golden）
+    if args.w_golden > 0:
+        golden_tr = []
+        for r in csv.DictReader(open(f"{args.golden_pairs}/pairs_train.csv", encoding="utf-8-sig")):
+            if r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp:
+                golden_tr.append((r["fp_i"], r["fp_j"], 1, float(r["weight"]) * args.w_golden,
+                                  "golden", int(r["dstar"])))
+        pairs_tr = pairs_tr + golden_tr
+        print(f"金标准干净对: {len(golden_tr)} 对 ×w{args.w_golden} 入训", flush=True)
     print(f"对: train {len(pairs_tr)} · val {len(pairs_va)} · test {len(pairs_te)}", flush=True)
 
     model, head, trainable = build_model(args.mid, device, args.head, args.full_ft)
+    if args.init_from:
+        ck = torch.load(args.init_from, map_location=device)
+        missing, unexpected = model.load_state_dict(ck["lora"], strict=False)
+        print(f"init-from {args.init_from}: 载入 LoRA {len(ck['lora'])} 键"
+              f"（unexpected {len(unexpected)}）", flush=True)
+    if args.freeze_all:
+        for p in model.parameters():
+            p.requires_grad_(False)
+        trainable = []
+        print("freeze-all：backbone+LoRA 全冻结，只训头", flush=True)
     if args.full_ft:
         opt = torch.optim.AdamW([
             {"params": trainable, "lr": args.lr_full},
             {"params": head.parameters(), "lr": LR_HEAD},
         ], weight_decay=0.0)
     else:
-        opt = torch.optim.AdamW([
-            {"params": trainable, "lr": LR_LORA},
-            {"params": head.parameters(), "lr": LR_HEAD},
-        ], weight_decay=0.0)
+        opt = torch.optim.AdamW(
+            ([{"params": trainable, "lr": LR_LORA}] if trainable else []) +
+            [{"params": head.parameters(), "lr": LR_HEAD}],
+            weight_decay=0.0)
 
     mean = torch.tensor([0.485, 0.456, 0.406], device=device).view(1, 3, 1, 1)
     std = torch.tensor([0.229, 0.224, 0.225], device=device).view(1, 3, 1, 1)
@@ -441,6 +540,12 @@ def main() -> int:
         if k["fingerprint"] in meta_by_fp and meta_by_fp[k["fingerprint"]]["split"] == "test":
             abs_probe[k["event_label"]].append((k["fingerprint"], abs_rated[name]))
 
+    cv_of = None
+    if args.head in CV_HEADS:
+        print("加载 CV 网格（cvfuse 头）...", flush=True)
+        cv_of = load_cv_grids("D:/PhotoDB/dataset/photos_dataset.db", fps)
+        print(f"CV 网格 {len(cv_of)} 张 × [8,1024]", flush=True)
+
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -448,15 +553,21 @@ def main() -> int:
         sub = pairs_tr[:512]
         loader = DataLoader(PairDataset(sub, args.cache), batch_size=args.batch_pairs,
                             shuffle=True, num_workers=args.workers,
-                            collate_fn=PairCollate(args.cache), pin_memory=True)
+                            collate_fn=PairCollate(args.cache, cv_of), pin_memory=True)
         model.train()
         head.train()
-        for step, (x, y, w) in enumerate(loader):
+        for step, blob in enumerate(loader):
+            if cv_of is not None:
+                x, y, w, cv = blob
+                cv = cv.to(device)
+            else:
+                x, y, w = blob
+                cv = None
             x = x.to(device).permute(0, 3, 1, 2).float().div_(255.0)
             x = (x - mean) / std
             y, w = y.to(device), w.to(device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
-                s = forward_scores(model, head, x)
+                s = forward_scores(model, head, x, cv)
             si, sj = s[: len(y)], s[len(y):]              # 前 B = i，后 B = j
             diff = si - sj
             per = torch.where(y == 0, diff.abs(), torch.nn.functional.softplus(-diff * y))
@@ -475,7 +586,7 @@ def main() -> int:
     g = torch.Generator().manual_seed(args.seed)
     loader = DataLoader(PairDataset(pairs_tr, args.cache), batch_size=args.batch_pairs,
                         shuffle=True, num_workers=args.workers, generator=g,
-                        collate_fn=PairCollate(args.cache), pin_memory=True,
+                        collate_fn=PairCollate(args.cache, cv_of), pin_memory=True,
                         persistent_workers=True)
     pairs_tr_eval = [p for p in pairs_tr if p[4] != "tie"]   # tie 对只进损失，不进指标
 
@@ -489,12 +600,18 @@ def main() -> int:
         model.train()
         head.train()
         tot = cnt = 0.0
-        for x, y, w in loader:
+        for blob in loader:
+            if cv_of is not None:
+                x, y, w, cv = blob
+                cv = cv.to(device, non_blocking=True)
+            else:
+                x, y, w = blob
+                cv = None
             x = x.to(device, non_blocking=True).permute(0, 3, 1, 2).float().div_(255.0)
             x = (x - mean) / std
             y, w = y.to(device, non_blocking=True), w.to(device, non_blocking=True)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=device == "cuda"):
-                s = forward_scores(model, head, x)
+                s = forward_scores(model, head, x, cv)
             si, sj = s[: len(y)], s[len(y):]              # 前 B = i，后 B = j
             diff = si - sj
             per = torch.where(y == 0, diff.abs(), torch.nn.functional.softplus(-diff * y))
@@ -507,7 +624,7 @@ def main() -> int:
             if cnt % 500 == 0:
                 print(f"ep{ep} step {cnt}/{len(loader)} loss {tot / cnt:.4f}", flush=True)
 
-        scores = score_all(model, head, fps, args.cache, device)
+        scores = score_all(model, head, fps, args.cache, device, cv_of=cv_of)
         X_dummy = np.zeros((len(fps), 1), dtype=np.float32)
         R, emerg, s_of = evaluate(_StubNet(scores), X_dummy, fps, metas,
                                   {"train": pairs_tr_eval, "val": pairs_va, "test": pairs_te},
