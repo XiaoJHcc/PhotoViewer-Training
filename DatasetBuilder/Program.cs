@@ -11,7 +11,11 @@ using Avalonia;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using Avalonia.Win32;
+using MetadataExtractor;
+using MetadataExtractor.Formats.Exif;
+using MetadataExtractor.Formats.Exif.Makernotes;
 using Microsoft.ML.OnnxRuntime;
+using PhotoViewer.Core;
 using PhotoViewer.Core.AI;
 using PhotoViewer.Core.Database;
 using PhotoViewer.Core.Image;
@@ -36,10 +40,10 @@ internal static class Program
         IngestManifest manifest;
         int? concurrencyOverride;
         bool scanOnly, noPatch;
-        string? modelFile, modelIdOverride, dumpRender;
+        string? modelFile, modelIdOverride, dumpRender, dumpAccel;
         try
         {
-            (manifest, concurrencyOverride, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender) = BuildManifest(args);
+            (manifest, concurrencyOverride, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender, dumpAccel) = BuildManifest(args);
         }
         catch (Exception ex)
         {
@@ -64,6 +68,11 @@ internal static class Program
         // 把每组代表件渲成 <fingerprint>.png 训练缓存。不建库、不提特征、无 ONNX 会话。
         if (dumpRender != null)
             return RunDumpRender(manifest, dumpRender, concurrencyOverride);
+
+        // 加速度计/姿态导出（水平度信号基建）：只读 EXIF（机型 + Sony 0x940F），
+        // 不解码位图、不建库、无 Avalonia/dispatcher。三轴恒导出，俯仰/横滚仅已校准机型。
+        if (dumpAccel != null)
+            return RunDumpAccel(manifest, dumpAccel, concurrencyOverride);
 
         if ((modelFile == null) != (modelIdOverride == null))
         {
@@ -129,7 +138,7 @@ internal static class Program
     /// </summary>
     private static async Task<int> DumpRenderAsync(IngestManifest manifest, string dir, int? concurrencyOverride)
     {
-        Directory.CreateDirectory(dir);
+        System.IO.Directory.CreateDirectory(dir);
         Console.WriteLine("扫描 + 指纹聚合中…");
         var groups = FingerprintGrouper.Scan(manifest.Folders);
         Console.WriteLine($"{groups.Count} 指纹组 → 渲染 {DinoModelResources.InputSize}px PNG → {dir}");
@@ -180,6 +189,116 @@ internal static class Program
         await Task.WhenAll(tasks);
         Console.WriteLine($"DUMP GATE: done={done} skip={skip} fail={fail} / total={groups.Count}");
         return fail == 0 ? 0 : 2;
+    }
+
+    /// <summary>--dump-accel 入口：纯 EXIF 读取（无位图解码/无 Avalonia/无 ONNX），主线程直接跑，不悬挂。</summary>
+    private static int RunDumpAccel(IngestManifest manifest, string csvPath, int? concurrencyOverride)
+    {
+        Console.WriteLine("扫描 + 指纹聚合中…");
+        var groups = FingerprintGrouper.Scan(manifest.Folders);
+        Console.WriteLine($"{groups.Count} 指纹组 → 读取机型 + Sony 0x940F 加速度计 → {csvPath}");
+
+        int concurrency = concurrencyOverride ?? manifest.Concurrency ?? Math.Max(1, Environment.ProcessorCount / 2);
+        var sem = new SemaphoreSlim(concurrency);
+        var rows = new ConcurrentBag<string>();
+        var models = new ConcurrentDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        int done = 0, withAccel = 0, withAngles = 0, noExif = 0;
+        var tasks = groups.Select(g => Task.Run(() =>
+        {
+            sem.Wait();
+            try
+            {
+                var r = ReadGroupAttitude(g);
+                if (r == null)
+                {
+                    Interlocked.Increment(ref noExif);
+                    rows.Add(string.Join(',', Csv(g.Fingerprint), Csv(g.Input.FilenameNoExt),
+                        Csv(g.Representative.Folder.EventLabel), Csv(g.Representative.Folder.SubjectLabel),
+                        Csv(g.Representative.RelPath), "", 0, "", "", "", "", "", "", "", ""));
+                    return;
+                }
+                var (model, att, hasAccel) = r.Value;
+                models.AddOrUpdate(model ?? "", 1, (_, c) => c + 1);
+                if (hasAccel) Interlocked.Increment(ref withAccel);
+                if (att?.RollDeg != null) Interlocked.Increment(ref withAngles);
+                string F(double? v, string fmt) => v.HasValue ? v.Value.ToString(fmt, CultureInfo.InvariantCulture) : "";
+                rows.Add(string.Join(',', Csv(g.Fingerprint), Csv(g.Input.FilenameNoExt),
+                    Csv(g.Representative.Folder.EventLabel), Csv(g.Representative.Folder.SubjectLabel),
+                    Csv(g.Representative.RelPath), Csv(model), hasAccel ? 1 : 0,
+                    hasAccel ? att!.Value.RawX.ToString(CultureInfo.InvariantCulture) : "",
+                    hasAccel ? att!.Value.RawY.ToString(CultureInfo.InvariantCulture) : "",
+                    hasAccel ? att!.Value.RawZ.ToString(CultureInfo.InvariantCulture) : "",
+                    F(hasAccel ? att!.Value.Ax : null, "F4"), F(hasAccel ? att!.Value.Ay : null, "F4"),
+                    F(hasAccel ? att!.Value.Az : null, "F4"),
+                    F(att?.PitchDeg, "F3"), F(att?.RollDeg, "F3")));
+                int d = Interlocked.Increment(ref done);
+                if (d % 500 == 0 || d == groups.Count)
+                    Console.WriteLine($"  [{d}/{groups.Count}] 有加速度 {withAccel} · 有姿态角 {withAngles}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[FAIL] {g.Representative.RelPath}: {ex.Message}");
+            }
+            finally
+            {
+                sem.Release();
+            }
+        })).ToArray();
+        Task.WaitAll(tasks);
+
+        System.IO.Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(csvPath))!);
+        using (var w = new StreamWriter(csvPath, false, new System.Text.UTF8Encoding(false)))
+        {
+            w.WriteLine("fingerprint,filename_noext,event_label,subject_label,source_rel_path,camera_model," +
+                        "has_accel,raw_x,raw_y,raw_z,accel_x_ms2,accel_y_ms2,accel_z_ms2,pitch_deg,roll_deg");
+            foreach (var row in rows) w.WriteLine(row);
+        }
+
+        Console.WriteLine($"DUMP-ACCEL GATE: groups={groups.Count} withAccel={withAccel} withAngles={withAngles} noExif={noExif}");
+        foreach (var kv in models.OrderByDescending(kv => kv.Value))
+            Console.WriteLine($"  机型 {kv.Key}: {kv.Value} 组");
+        return 0;
+    }
+
+    /// <summary>CSV 字段转义（含逗号/引号/换行才加引号）。null → 空串。</summary>
+    private static string Csv(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Contains(',') || s.Contains('"') || s.Contains('\n')
+            ? "\"" + s.Replace("\"", "\"\"") + "\""
+            : s;
+    }
+
+    /// <summary>
+    /// 读一组的姿态信息：按解码代价升序逐文件读 EXIF，直到拿到 0x940F 或试完。
+    /// 机型取首个有 IFD0 Model 的文件。返回 null = 全组连 EXIF 都读不到。
+    /// </summary>
+    private static (string? Model, AccelAttitude? Att, bool HasAccel)? ReadGroupAttitude(FpGroup group)
+    {
+        string? model = null;
+        AccelAttitude? att = null;
+        bool hasAccel = false, anyExif = false;
+        foreach (var file in group.Files)
+        {
+            IReadOnlyList<MetadataExtractor.Directory> dirs;
+            try
+            {
+                using var stream = File.OpenRead(file.Path);
+                dirs = ImageMetadataReader.ReadMetadata(stream);
+            }
+            catch { continue; }
+            anyExif = true;
+            model ??= dirs.OfType<ExifIfd0Directory>().FirstOrDefault()
+                ?.GetString(ExifDirectoryBase.TagModel)?.Trim();
+            var sony = dirs.OfType<SonyType1MakernoteDirectory>().FirstOrDefault();
+            if (sony != null && SonyAttitudeDecoder.TryDecode(sony, model, out var a))
+            {
+                att = a;
+                hasAccel = true;
+                break; // 拿到加速度即停（同组同曝光，任意文件等价）
+            }
+        }
+        return anyExif ? (model, att, hasAccel) : null;
     }
 
     /// <summary>核心流水线（在后台线程执行）：建库 → 写 meta → 扫描聚合 → 逐组四路提取 → 覆盖率报告 + GATE。</summary>
@@ -394,13 +513,13 @@ internal static class Program
         return (set, true);
     }
 
-    private static (IngestManifest, int?, bool, string?, string?, bool, string?) BuildManifest(string[] args)
+    private static (IngestManifest, int?, bool, string?, string?, bool, string?, string?) BuildManifest(string[] args)
     {
         string? manifestPath = null, dbPath = null;
         int? concurrency = null;
         bool noEnhance = false, scanOnly = false;
         string? modelFile = null, modelIdOverride = null; bool noPatch = false;
-        string? dumpRender = null;
+        string? dumpRender = null, dumpAccel = null;
         var folders = new List<string>();
 
         for (int i = 0; i < args.Length; i++)
@@ -416,6 +535,7 @@ internal static class Program
                 case "--model-id" when i + 1 < args.Length: modelIdOverride = args[++i]; break;
                 case "--no-patch": noPatch = true; break;
                 case "--dump-render" when i + 1 < args.Length: dumpRender = args[++i]; break;
+                case "--dump-accel" when i + 1 < args.Length: dumpAccel = args[++i]; break;
                 default:
                     if (!args[i].StartsWith("--")) folders.Add(args[i]);
                     break;
@@ -423,12 +543,18 @@ internal static class Program
         }
 
         if (manifestPath != null)
-            return (IngestManifest.Load(manifestPath), concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender);
+        {
+            var loaded = IngestManifest.Load(manifestPath);
+            // 清单之外的裸文件夹追加为无标签条目（--dump-accel 补扫旧批等场景）。
+            foreach (var f in folders)
+                loaded.Folders.Add(new FolderEntry { Path = f, Recursive = true });
+            return (loaded, concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender, dumpAccel);
+        }
 
-        // 快速模式：直接给文件夹 + --db，无标签。--scan-only / --dump-render 不写库，故不要求 --db。
+        // 快速模式：直接给文件夹 + --db，无标签。--scan-only / --dump-render / --dump-accel 不写库，故不要求 --db。
         if (folders.Count == 0)
             throw new ArgumentException("需要 --manifest <路径>，或提供文件夹（+ --db <路径>，--scan-only 除外）。");
-        if (dbPath == null && !scanOnly && dumpRender == null)
+        if (dbPath == null && !scanOnly && dumpRender == null && dumpAccel == null)
             throw new ArgumentException("快速模式需要 --db <数据集库路径>（或加 --scan-only 只看分布）。");
 
         var m = new IngestManifest
@@ -437,7 +563,7 @@ internal static class Program
             Enhance = new EnhanceOptions { Enabled = !noEnhance },
             Folders = folders.Select(f => new FolderEntry { Path = f, Recursive = true }).ToList(),
         };
-        return (m, concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender);
+        return (m, concurrency, scanOnly, modelFile, modelIdOverride, noPatch, dumpRender, dumpAccel);
     }
 
     private static void PrintUsage()
@@ -458,5 +584,6 @@ internal static class Program
         Console.WriteLine("  --model-id <id>     升级梯实验：本批特征落库的 model_id（须与 --model-file 成对）");
         Console.WriteLine("  --no-patch          不提取 patch token（梯级探针只提双路 CLS，省 ~38GB）");
         Console.WriteLine("  --dump-render <dir> 梯4 LoRA 前置：按 DINO 输入口径把每组代表件渲成 <fingerprint>.png 缓存（不建库、不提特征）");
+        Console.WriteLine("  --dump-accel <csv>  姿态导出：逐指纹组读机型 + Sony 0x940F 加速度计 → CSV（三轴恒有，俯仰/横滚仅已校准机型；不建库、不解码位图）");
     }
 }

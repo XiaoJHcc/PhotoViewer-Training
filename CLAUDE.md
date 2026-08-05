@@ -24,6 +24,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 
 - **构建**:`dotnet build Training/Training.sln`(独立解决方案,仅含 `DatasetBuilder`;**不要**把它加进主 `PhotoViewer.sln`——`DatasetBuilder` 是 `net10.0-windows`,加进跨平台主 sln 会连累 Mac/iOS 头的构建)。
 - **运行提取**:`dotnet run --project Training/DatasetBuilder -- --manifest <manifest.json>`(清单驱动,见 [DatasetBuilder/manifest.sample.json](DatasetBuilder/manifest.sample.json))或 `dotnet run --project Training/DatasetBuilder -- <folder>... --scan-only`(只扫描不建库,快速核验批次分布)。
+- **姿态导出**:`dotnet run --project Training/DatasetBuilder -- --manifest <manifest.json> [附加文件夹...] --dump-accel <csv>`(逐指纹组读机型 + Sony 0x940F → CSV;三轴恒有,俯仰/横滚仅已校准机型 ILCE-7CM2/ILCE-6700;ILCE-6100 的 0x940F 为全零块=无数据;纯 EXIF 读取不建库、不悬挂)。全库产物 `D:/PhotoDB/dataset/accel_export.csv`。
 - **探针**:Python 侧用仓根 `Tools/.venv`(独立虚拟环境,首轮探针即用它;新建则 `pip install -r Training/probes/requirements.txt`),例如 `Tools/.venv/Scripts/python.exe Training/probes/feature_probe.py --db D:/PhotoDB/dataset/photos_dataset.db`(从仓根执行)。
 
 ## 对产品的契约
