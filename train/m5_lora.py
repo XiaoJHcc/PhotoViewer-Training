@@ -10,7 +10,8 @@ backbone 本身（LoRA 注入每层 attention q/k/v/o_proj），用 M3 训练对
 损失：与 M4 同式的加权 softplus 对级 logistic（window/global/derived 三类全用）。
 训练：bf16 autocast；batch 16 对（32 图）；AdamW（LoRA 1e-4 / 头 1e-3）；
     固定 epoch 不早停（交接教训：val 近 chance 时早停≈随机）；每 epoch 全库打分 +
-    全指标评估，报告轨迹。无增广（翻转改构图语义、影调增广违宪）；EXIF/CV 不进模型。
+    全指标评估，报告轨迹。无增广（翻转改构图语义、影调增广违宪）；EXIF 不进模型
+    （cvfuse 头例外：CV 网格 + 水平度通道是用户处方的例外通道）。
 评估：桩 net 喂 m4_baseline.evaluate → 同一份报告（对级按类/按Δ、段内 top-1、
     段内 Spearman、recall@12.5% ×2、0-5 容差三层、abs 涌现代理）。
 
@@ -41,6 +42,15 @@ from m4_baseline import ABS_KEY_DEFAULT, ABS_TSV_DEFAULT, M3_DIR_DEFAULT, evalua
 CACHE_DEFAULT = "D:/PhotoDB/dataset/render518"
 MID_DEFAULT = os.path.expanduser(
     "~/.cache/modelscope/hub/models/facebook/dinov3-vits16-pretrain-lvd1689m")
+
+# 水平度 CV 网格增量（2026-08-05 水平度专项资产；仅 cvfuse 头使用）：
+# EXIF 横滚（--dump-accel 导出，ILCE-6100 无数据靠 valid 通道标记）+ CV 地平线检测。
+ACCEL_CSV = "D:/PhotoDB/dataset/accel_export.csv"
+CV_HORIZON_CSV = str(Path(__file__).resolve().parent.parent / "audit" / "out" / "horizon"
+                     / "cv_horizon_full.csv")
+CV_BASE_CHANNELS = 8          # DB cv_grid 原生：7 标量 + 逐格 NaN 比例掩码
+CV_HZ_CHANNELS = 4            # 水平度增量：exif_err / exif_valid / cv_err / cv_conf
+CV_CHANNELS = CV_BASE_CHANNELS + CV_HZ_CHANNELS
 
 LORA_R = 16
 LORA_ALPHA = 32
@@ -101,7 +111,9 @@ class CvFuseHead:
     """头 v3（DINO×CV 分块融合，用户 2026-07-28 指导）：patch token 与 CV 网格
     空间对齐（皆 32×32 全画面均匀采样），逐格拼接 CV 投影后残差融合，注意力池化。
     让模型自己学"哪块的模糊/锐度该影响分数"（如主体锐度 vs 天然变化区），
-    不做 CV 特判硬规则。cv 输入 [B,8,1024]：7 标量（NaN→0）+ 1 逐格 NaN 比例掩码。"""
+    不做 CV 特判硬规则。cv 输入 [B,12,1024]：7 标量（NaN→0）+ 逐格 NaN 比例掩码
+    + 水平度 4 通道（exif_err/exif_valid/cv_err/cv_conf，全局标量广播到逐格，
+    2026-08-05 增量——极相似带判别力已实证，见 docs/agent-handover.md §3）。"""
 
     @staticmethod
     def build(dim, n_reg):
@@ -111,7 +123,7 @@ class CvFuseHead:
         class _H(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.cv_proj = nn.Linear(8, 64)
+                self.cv_proj = nn.Linear(CV_CHANNELS, 64)
                 self.fuse = nn.Linear(dim + 64, dim)
                 self.q = nn.Parameter(torch.randn(dim) * 0.02)
                 self.lin = nn.Linear(dim * 2, 1)
@@ -189,7 +201,7 @@ def build_model(mid: str, device: str, head_kind: str = "cls", full_ft: bool = F
 
 
 def forward_scores(model, head, x, cv=None):
-    """x: [B,3,518,518] 已归一化 → [B] 分数。cv（cvfuse 头）: [B,8,1024]。"""
+    """x: [B,3,518,518] 已归一化 → [B] 分数。cv（cvfuse 头）: [B,12,1024]。"""
     h = model(pixel_values=x).last_hidden_state
     if cv is not None:
         return head(h.float(), cv.float())
@@ -221,7 +233,7 @@ def _load_img(cache, fp):
 
 class PairCollate:
     """顶层可调用类（Windows spawn worker 须可 pickle）。返回 [2B,H,W,3] uint8 + y + w
-    （cv 字典非 None 时再附 [2B,8,1024] CV 网格）。"""
+    （cv 字典非 None 时再附 [2B,12,1024] CV 网格）。"""
 
     def __init__(self, cache, cv_of=None):
         self.cache = cache
@@ -263,11 +275,35 @@ class FpCollate:
         return x
 
 
+def _dev90(x: float) -> float:
+    """折到 [-45,45)：相对最近 0/90 轴的偏差（与 horizon_eval.py 同口径）。"""
+    return (x + 45.0) % 90.0 - 45.0
+
+
 def load_cv_grids(db, fps):
-    """fp → [8,1024] float32（7 标量 NaN→0 + 逐格 NaN 比例掩码）；缺网格给全 0 + 掩码 1。"""
+    """fp → [12,1024] float32：DB 原生 [7 标量 NaN→0 + 逐格 NaN 掩码] +
+    水平度 4 通道（exif_err=|dev90(roll)| NaN→0 / exif_valid 0-1 /
+    cv_err=|cv_tilt| / cv_conf，全局标量广播到逐格）。
+    缺网格给全 0 + 掩码 1 + 水平度通道全 0（valid=0）。"""
     import sqlite3
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "probes"))
     from feature_probe import CV_PLANE_LEN, CV_SCALAR_COUNT
+
+    def _load_hz():
+        """fp → (exif_err, exif_valid, cv_err, cv_conf)；资产 CSV 缺失时返回空表。"""
+        exif, cvx = {}, {}
+        if os.path.isfile(ACCEL_CSV):
+            for r in csv.DictReader(open(ACCEL_CSV, encoding="utf-8-sig")):
+                if r["roll_deg"] != "":
+                    exif[r["fingerprint"]] = abs(_dev90(float(r["roll_deg"])))
+        if os.path.isfile(CV_HORIZON_CSV):
+            for r in csv.DictReader(open(CV_HORIZON_CSV, encoding="utf-8-sig")):
+                if r["cv_tilt_deg"] != "":
+                    cvx[r["fingerprint"]] = (abs(float(r["cv_tilt_deg"])), float(r["conf"]))
+        return exif, cvx
+
+    exif_hz, cv_hz = _load_hz()
+    print(f"水平度通道: EXIF 横滚 {len(exif_hz)} 张 · CV 地平线 {len(cv_hz)} 张", flush=True)
     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
     try:
         raw = {fp: blob for fp, blob in conn.execute("SELECT fingerprint, cv_grid FROM photos")}
@@ -278,12 +314,19 @@ def load_cv_grids(db, fps):
         blob = raw.get(fp)
         arr = np.frombuffer(blob, dtype="<f4") if blob is not None else None
         if arr is None or arr.size != CV_SCALAR_COUNT * CV_PLANE_LEN:
-            out[fp] = np.concatenate([np.zeros((7, CV_PLANE_LEN), np.float32),
-                                      np.ones((1, CV_PLANE_LEN), np.float32)])
-            continue
-        grid = arr.reshape(CV_SCALAR_COUNT, CV_PLANE_LEN).astype(np.float32)
-        mask = np.isnan(grid).mean(axis=0, keepdims=True).astype(np.float32)
-        out[fp] = np.concatenate([np.nan_to_num(grid, nan=0.0), mask])
+            base = np.concatenate([np.zeros((7, CV_PLANE_LEN), np.float32),
+                                   np.ones((1, CV_PLANE_LEN), np.float32)])
+        else:
+            grid = arr.reshape(CV_SCALAR_COUNT, CV_PLANE_LEN).astype(np.float32)
+            mask = np.isnan(grid).mean(axis=0, keepdims=True).astype(np.float32)
+            base = np.concatenate([np.nan_to_num(grid, nan=0.0), mask])
+        ex_err = exif_hz.get(fp)
+        cv_t, cv_c = cv_hz.get(fp, (0.0, 0.0))
+        hz_col = np.array([ex_err if ex_err is not None else 0.0,
+                           1.0 if ex_err is not None else 0.0, cv_t, cv_c],
+                          dtype=np.float32)[:, None]
+        hz = np.broadcast_to(hz_col, (CV_HZ_CHANNELS, CV_PLANE_LEN))
+        out[fp] = np.concatenate([base, hz])
     return out
 
 
@@ -544,7 +587,7 @@ def main() -> int:
     if args.head in CV_HEADS:
         print("加载 CV 网格（cvfuse 头）...", flush=True)
         cv_of = load_cv_grids("D:/PhotoDB/dataset/photos_dataset.db", fps)
-        print(f"CV 网格 {len(cv_of)} 张 × [8,1024]", flush=True)
+        print(f"CV 网格 {len(cv_of)} 张 × [{CV_CHANNELS},1024]", flush=True)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
