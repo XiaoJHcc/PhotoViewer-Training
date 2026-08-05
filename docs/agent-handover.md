@@ -4,7 +4,8 @@
 > [../STATUS.md](../STATUS.md)（机器真源·当前进度）→ [analysis-story.md](analysis-story.md)
 > （人读叙事版，**§10-§11 = 训练阶段总叙事**）→ [../EXECUTION-LOG.md](../EXECUTION-LOG.md)
 > （证据链台账，append-only）→ [transfer-failure-analysis.md](transfer-failure-analysis.md)（失败矩阵详尽版）。
-> **维护**：重大阶段交接时重写；本文版本 = 2026-08-02（台阶②封板 + 人话改写 + 人类线实测）。
+> **维护**：重大阶段交接时重写；本文版本 = 2026-08-02（台阶②封板 + 人话改写 + 人类线实测），
+> 2026-08-05 增补（水平度专项：§3 候选规则、§4 负知识四行、§5.2 实证、§6 噪声区纪律、§7 资产）。
 > **注意**：本文刻意不写"后续具体计划"——方向与判据在此，怎么走由你判断。
 
 ---
@@ -41,20 +42,25 @@
 - **M2 校准尺**：~400 张盲评 → 潜变量拟合 `s=g(段内星)+b_seg`（全库第一把统一的尺，
   留出 Δ≥2 0.86-0.90）；派生 derived 训练对即从此尺派生。
 
-## 3. 当前位置（成果进度，2026-08-02 封板）
+## 3. 当前位置（成果进度，2026-08-02 封板 + 2026-08-05 水平度增补）
 
 | 台阶 | 现状 | 关键数字 | 死活原因 |
 |---|---|---|---|
 | ① 高分段任意两张 | **站住** | **0.766**（derived Δ≥2，n=1422；配方带 0.755-0.766） | M2 校准尺可学 + 系综 + 只考真实差异区 |
-| ② 团内选优 | **接近可用** | 金标准考卷（59 判定组）：**exact 0.47 / ≤1 0.88 / 前二 0.93**；前二**已达人类线**（0.93），冠军位差一截 | 瓶颈="学得进必扭曲"困境（见 §4）；距四层标准每层差 2-3 组 |
+| ② 团内选优 | **接近可用** | 金标准考卷（59 判定组）：**exact 0.47 / ≤1 0.88 / 前二 0.93**；前二**已达人类线**（0.93），冠军位差一截。**候选增强（2026-08-05，待复核）**：极相似带条件水平度规则 → **0.53 / 0.92 / 0.93** | 瓶颈="学得进必扭曲"困境（见 §4）；距四层标准每层差 2-3 组 |
 | ③ 团顶排序 | 未站住 | 召回 0.244 | 高星团顶太少（全库 5★ 仅 184 张），监督考试双稀薄 |
 
 - **当前最优形态（可复现）**：系综 = `m5_lora`(ep1) + `m5_lora_patch`(ep3) + `m7_extprobe`(LAION)
   + `m4_l518_cls2`，各分数 z-score 均权。台阶① 产物 `train/out/m8_best/`；台阶①考卷 `train/m8_ensemble.py`；
   台阶②考卷 `D:/PhotoDB/dataset/golden_exam/` + `audit/golden_exam_eval.py`（四层剖面）。
+- **水平度候选规则（2026-08-05，n=9 待考卷扩充复核，不刻死）**：团内 cos≥0.96 且最平/次平
+  EXIF 横滚误差差 ≥0.3° 时改选最平者，否则跟系综 → 考卷 **exact 0.53 / ≤1 0.92 / 前二 0.93**
+  （评估器 `audit/horizon_eval.py` §E）。机制：极相似带内容差异趋零，水平度成为可见判别因子
+  （用户先验注册后实证）；带外（内容主导、刻意倾斜合法）该信号反预测，**严禁全量套用**。
 - **结论链一句话**：冻结特征跨场零迁移（M1 探针三连）→ 绝对尺只能由监督引入（§1.5）→
   M2 造出统一的尺 → 蒸馏该尺 + 系综 = 台阶①（0.755→0.766）→ 金标准实测旧标签噪声并换真尺
-  → 台阶②重估接近可用 → 改进三臂全灭（困境实证）→ **模型侧空间封板，剩余杠杆在数据侧**。
+  → 台阶②重估接近可用 → 改进三臂全灭（困境实证）→ **模型侧空间封板，剩余杠杆在数据侧**
+  → 水平度带条件规则 = 第一条实证的非模型信号（候选 0.53/0.92/0.93，2026-08-05）。
 
 ## 4. 已证死方向（负知识，勿重开）
 
@@ -73,6 +79,11 @@
 | val 贪心系综加权 | val 单事件太薄，不具系综排序能力 | search → test 0.684 |
 | 同 run 快照系综 | 快照相关性过高 | 0.744 无增益 |
 | Python 复刻渲染管线 | 解码/缩放实现差异 → 特征余弦仅 0.90 | **渲染正路 = C# `--dump-render`** |
+| 水平度全量套用（无带条件） | 带外内容主导+刻意倾斜合法 → 反预测 | 全卷 0.32 vs 系综 0.47 |
+| 水平度组内共识参照（exif_rel/cv_rel） | "异类即歪"假设不成立 | 0.11/0.37（n=27） |
+| CV 地平线直选（cv_abs，518px） | 视觉参照噪声 MAD≈1°，弱于 EXIF 直给 | 带内 0.44 vs 0.78 |
+| 锐度全局均值/逐格投票选最锐 | 空间等权=错口径，"哪块该计分"须学习 | 带内 0.33（cv_sharpness_eval） |
+| 手工多信号组合（水平度+抖动一致改选） | n=9 下任何加权=过拟合，一致规则不及单信号 | 6/9 < 7/9 |
 
 ## 5. 待尝试 / 验证的草案（开放，由你判断优先级与做法）
 
@@ -86,6 +97,8 @@
    判别力实证（带内 exact 0.78 vs 系综 0.44，带外反预测），带条件候选规则考卷 0.53/0.92/0.93 待考卷扩充复核；
    全库姿态资产 `D:/PhotoDB/dataset/accel_export.csv`（ILCE-6100 无 0x940F 数据，"未知轴序"无对象收敛）+
    CV 地平线 `audit/out/horizon/`（`horizon_cv.py`/`horizon_eval.py`）；重训时可作 CV 网格增量。
+   **融合上限的机制证据（同日）**：带内水平度（0.78）/抖动 drag_width（0.78）/系综（0.44）三判官
+   错误组互不重叠（H011/H014 vs H004/H013 vs 其余）——空间加权融合理论上限高于任一单信号手工规则。
 3. **台阶① 可用性验收实验**：强/弱二分后看人工复核率，把 0.766 从数字变成"敢不敢用"的证据。
 4. **团内人类线复测**：同人同卷、数周后重标一批金标准团（记忆冲刷），测严格的团内复测一致性
    （现用跨年上界 0.66-0.73/0.93）——把"达到人类线即可用"的判据钉死。
@@ -99,6 +112,10 @@
   组内标星 = 组内排序、禁止跨组数值比较；单体 LoRA 数字按 **±6pt 种子噪声带**判读；
   val 近 chance 不可靠——固定 epoch 预算 + 逐轮轨迹；闸门只卡真实差异处（Δ≥2）；
   绝对尺只用团顶+孤立照；**考卷（golden_exam 73 团）永久不入训**。
+- **水平度纪律（2026-08-05）**：**亚 1° 水平度差异 = 噪声区**（EXIF↔CV 残差 MAD≈1.0-1.2°，
+  n=6473，与 golden_star2 人工 1.27° 互证）；信号只在**极相似带（cos≥0.96）**有效，
+  带外反预测；ILCE-6100 的 0x940F 整块全零（无数据，占库 24%），其水平度只能走 CV 检测；
+  新机型轴序标定 = `SonyAttitudeDecoder.DecryptRaw` + ExifTestTool `accel` 子命令 + CV 参照穷举置换。
 - **训练纪律**：**训练在飞时禁改 m5_lora.py**（spawn worker 重载崩毁过 R1 首跑）；
   固定 3 epoch 不早停；每轮全库打分留 scores_ep*.csv（一切后续系综/考卷评估的原料）。
 - **工程环境**：命令统一在 `D:/Git/PhotoViewer`（仓根）跑；探针/导出用 `Tools/.venv/Scripts/python.exe`（CPU），
@@ -126,8 +143,8 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10-§11 = 训练阶段总叙事**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback/cluster_eval/batch2_sampler/exam_merge/exam_eval/pair_gen——金标准全链）/ horizon_cv（CV 地平线检测）+ horizon_eval（水平度考卷评估，2026-08-05）** |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback/cluster_eval/batch2_sampler/exam_merge/exam_eval/pair_gen——金标准全链）/ horizon_cv（CV 地平线检测）+ horizon_eval（水平度考卷评估+候选规则）+ cv_sharpness_eval（锐度/抖动规则负知识，2026-08-05）** |
 | `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估；开关全：`--seed/--w-abs/--abs-min-d/--w-golden/--full-ft/--init-from/--freeze-all/--head cls|patch|cvfuse`）** · **m8_ensemble.py（系综+三级台阶考卷）** · m6_adapt_sim.py · m7_extprobe.py（CLIP+LAION 先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
-| `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** |
+| `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** + **`--dump-accel`（姿态导出：机型+0x940F 三轴/横滚 → CSV，纯 EXIF 不解码不悬挂，2026-08-05）** |
 | `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_exam/（73 团标准考卷，永久不入训）** · golden_star/golden_star2（批1/批2 标星集+读回明细） · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |
 | 关键数据资产 | `audit/out/m3_pairs/`（train 60180/val 1771/test 9542 + photos.csv） · `audit/out/abs_pairs/`（A1：train 20467/val 54/test 924） · **`audit/out/golden_pairs/`（325 对确信度加权干净对）** · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分） · `audit/out/clusters/clusters.csv`（2569 团） · `train/out/m8_best/`（当前最优系综产物） · **`D:/PhotoDB/dataset/accel_export.csv`（9418 组姿态：7128 有横滚，2026-08-05）** · `audit/out/horizon/cv_horizon_full.csv`（全库 CV 地平线） |
