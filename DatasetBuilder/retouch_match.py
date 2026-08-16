@@ -29,14 +29,26 @@ import sqlite3
 from collections import defaultdict
 from pathlib import Path
 
-# 事件目录 → 库内 event_label。目录命名规则 = eventLabel + " P2"（F:\照片2026-P2 现行结构）。
+# 事件目录 → 库内 event_label。目录命名规则 = eventLabel + 根后缀（" P2" / " NAS"）。
 P2_SUFFIX = " P2"
-EVENT_ROOTS = [Path("F:/照片2026-P2")]
+NAS_SUFFIX = " NAS"
+EVENT_ROOTS = [Path("F:/照片2026-P2"), Path("F:/照片-已备份NAS"), Path("F:/照片2025-P2")]
+
+# 精修产出目录的发现规则（2025 批新命名形态见 ingest_survey_2025-08-05.md）：
+# 前缀 OUT-JPG / OUTJPG / JPG-，或文件夹内容含 @JPG 导出件（如"三叠泉9""黑神话"）。
+OUT_PREFIX = re.compile(r"^(OUT-?JPG|JPG-)", re.IGNORECASE)
+# 排除机型/内容文件夹（DJI 无人机等的产出目录不发现、不匹配）。
+SKIP_DIR_KW = ("DJI", "VIDEO", "NEF")
 
 # 手工别名：OUT-JPG 文件名基（剥 @JPG 后）→ 库内原片基名（用户逐案裁定后登记）。
 # 2026-07-19：A7C01320-Mix15 = 绍兴 A7C01320 的 15 张混合导出件，挂同事件基片（重庆春天同名 5★ 片为异片，不标）。
 MANUAL_ALIAS: dict[str, str] = {
     "A7C01320-Mix15": "A7C01320",
+}
+
+# 事件标签别名：NAS 目录名剥后缀后与库内 event_label 的拼写差异在此登记。
+LABEL_ALIAS: dict[str, str] = {
+    "2025-3-23-重庆春天": "2025-3-23 重庆春天",   # 库内为空格拼写（2026-07-19 批次）
 }
 
 # ACR 导出后缀：@JPG 可带重复导出序号（@JPG_1 / @JPG_2 ...）。
@@ -55,16 +67,29 @@ def main() -> int:
     args = parse_args()
     out_dir = Path(args.out)
 
-    # 1) 发现全部 OUT-JPG* 目录并解析事件标签
-    targets: list[tuple[Path, str]] = []  # (out_jpg_dir, event_label)
+    # 1) 发现全部精修产出目录并解析事件标签
+    targets: list[tuple[Path, str]] = []  # (out_dir, event_label)
     for root in EVENT_ROOTS:
         for event_dir in sorted(p for p in root.iterdir() if p.is_dir()):
             for sub in sorted(p for p in event_dir.iterdir() if p.is_dir()):
-                if sub.name.upper().startswith("OUT-JPG"):
-                    label = event_dir.name
-                    if label.endswith(P2_SUFFIX):
-                        label = label[: -len(P2_SUFFIX)]
-                    targets.append((sub, label))
+                if any(k in sub.name.upper() for k in SKIP_DIR_KW):
+                    continue
+                is_out = bool(OUT_PREFIX.match(sub.name))
+                if not is_out:
+                    # 命名不规则的精修文件夹（如"三叠泉9"）：内容含 @JPG 导出件即认定
+                    is_out = any(
+                        EXPORT_SUFFIX.search(f.stem)
+                        for f in sub.rglob("*")
+                        if f.is_file() and f.suffix.upper() == ".JPG" and not f.name.startswith("._")
+                    )
+                if not is_out:
+                    continue
+                label = event_dir.name
+                for suf in (P2_SUFFIX, NAS_SUFFIX):
+                    if label.endswith(suf):
+                        label = label[: -len(suf)]
+                label = LABEL_ALIAS.get(label, label)
+                targets.append((sub, label))
     if not targets:
         print("[ERROR] 未发现任何 OUT-JPG* 目录")
         return 1
