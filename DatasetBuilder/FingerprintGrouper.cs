@@ -17,11 +17,15 @@ public static class FingerprintGrouper
 {
     /// <summary>扫描清单文件夹并按指纹聚合。</summary>
     /// <param name="folders">清单中的文件夹条目。</param>
+    /// <param name="excludeKeywords">排除关键词：相对路径任一组成部分（含文件名）命中即跳过。</param>
     /// <returns>指纹组列表。</returns>
-    public static List<FpGroup> Scan(IReadOnlyList<FolderEntry> folders)
+    public static List<FpGroup> Scan(IReadOnlyList<FolderEntry> folders,
+        IReadOnlyList<string>? excludeKeywords = null)
     {
         var byFp = new Dictionary<string, List<SourceFile>>();
         var inputByFp = new Dictionary<string, PhotoFingerprintInput>();
+        var kws = excludeKeywords ?? (IReadOnlyList<string>)Array.Empty<string>();
+        var nExcluded = 0;
 
         foreach (var entry in folders)
         {
@@ -36,6 +40,11 @@ public static class FingerprintGrouper
                          .Where(p => !Path.GetFileName(p).StartsWith("._", StringComparison.Ordinal))
                          .Where(PhotoDecode.IsImage))
             {
+                if (kws.Count > 0 && IsExcluded(entry.Path, path, kws))
+                {
+                    nExcluded++;
+                    continue;
+                }
                 var exif = PhotoDecode.ReadExif(path);
                 var captureTime = exif.CaptureTime ?? File.GetLastWriteTimeUtc(path);
                 var input = new PhotoFingerprintInput
@@ -66,7 +75,20 @@ public static class FingerprintGrouper
             list.Sort((a, b) => DecodeCostScore(a.Path).CompareTo(DecodeCostScore(b.Path)));
             result.Add(new FpGroup(fp, inputByFp[fp], list));
         }
+        if (kws.Count > 0)
+            Console.WriteLine($"[排除] 关键词命中剔除 {nExcluded} 文件（{string.Join("/", kws)}）");
         return result;
+    }
+
+    /// <summary>相对路径任一组成部分（含文件名）命中排除关键词（大小写不敏感）即剔除。</summary>
+    private static bool IsExcluded(string root, string path, IReadOnlyList<string> kws)
+    {
+        var rel = Path.GetRelativePath(root, path);
+        foreach (var comp in rel.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            foreach (var kw in kws)
+                if (comp.Contains(kw, StringComparison.OrdinalIgnoreCase))
+                    return true;
+        return false;
     }
 
     /// <summary>解码代价评分：越小越快，同组取最小者作代表。</summary>

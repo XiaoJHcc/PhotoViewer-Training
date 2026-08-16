@@ -60,6 +60,22 @@ public static class ScanReport
             Console.WriteLine($"  {star}★ {Bar(n, groups.Count)} {n}");
         }
 
+        // 逐事件星级分布（标签只在事件内可比序——锦标赛形态核查必须分事件看）
+        var byEvent = groups.GroupBy(g => g.Representative.Folder.EventLabel ?? "(无事件标签)")
+            .OrderBy(x => x.Key).ToList();
+        if (byEvent.Count > 1)
+        {
+            Console.WriteLine("\n— 逐事件星级（按指纹组）—");
+            foreach (var ev in byEvent)
+            {
+                var cnt = Enumerable.Range(0, 6).Select(s => ev.Count(g => g.Rating == s)).ToArray();
+                int tot = cnt.Sum();
+                int hi = cnt[3] + cnt[4] + cnt[5];
+                Console.WriteLine($"  {ev.Key}: " + string.Join(" · ", cnt.Select((c, s) => $"{s}★{c}"))
+                    + $"  (计{tot} · ≥3★ {hi * 100.0 / tot:0.0}%)");
+            }
+        }
+
         // 长焦段星级交叉：超长焦低对比片有没有被评过星、能否配对（探针 A/B 的关键前提）
         Console.WriteLine("\n— 长焦段(≥135mm 等效)星级分布 —");
         var tele = groups.Where(g => EquivFocal(g.Representative.Exif) is double v && v >= 135).ToList();

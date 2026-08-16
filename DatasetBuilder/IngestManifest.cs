@@ -29,6 +29,13 @@ public sealed class IngestManifest
     [JsonPropertyName("retouchedList")]
     public string? RetouchedList { get; set; }
 
+    /// <summary>
+    /// 可选：排除关键词（大小写不敏感）。文件相对路径的任一组成部分（含文件名）命中即跳过——
+    /// 剔除 Stack/Pano/HDR 素材子文件夹、@JPG/OUT-JPG 精修产出、延时连拍、DJI/NEF/Video 等非原片内容。
+    /// </summary>
+    [JsonPropertyName("excludeKeywords")]
+    public List<string> ExcludeKeywords { get; set; } = new();
+
     /// <summary>解码并发数；缺省 CPU/2。ONNX 推理内部另有单闸串行化。</summary>
     [JsonPropertyName("concurrency")]
     public int? Concurrency { get; set; }

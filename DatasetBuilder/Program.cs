@@ -60,7 +60,7 @@ internal static class Program
         // 分布探查：只扫描 + 指纹聚合 + 读 EXIF，不解码、不建库、不需要 Avalonia/DirectML。
         if (scanOnly)
         {
-            ScanReport.Print(FingerprintGrouper.Scan(manifest.Folders));
+            ScanReport.Print(FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords));
             return 0;
         }
 
@@ -140,7 +140,7 @@ internal static class Program
     {
         System.IO.Directory.CreateDirectory(dir);
         Console.WriteLine("扫描 + 指纹聚合中…");
-        var groups = FingerprintGrouper.Scan(manifest.Folders);
+        var groups = FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords);
         Console.WriteLine($"{groups.Count} 指纹组 → 渲染 {DinoModelResources.InputSize}px PNG → {dir}");
         int concurrency = concurrencyOverride ?? manifest.Concurrency ?? Math.Max(1, Environment.ProcessorCount / 2);
         var sem = new SemaphoreSlim(concurrency);
@@ -195,7 +195,7 @@ internal static class Program
     private static int RunDumpAccel(IngestManifest manifest, string csvPath, int? concurrencyOverride)
     {
         Console.WriteLine("扫描 + 指纹聚合中…");
-        var groups = FingerprintGrouper.Scan(manifest.Folders);
+        var groups = FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords);
         Console.WriteLine($"{groups.Count} 指纹组 → 读取机型 + Sony 0x940F 加速度计 → {csvPath}");
 
         int concurrency = concurrencyOverride ?? manifest.Concurrency ?? Math.Max(1, Environment.ProcessorCount / 2);
@@ -341,7 +341,7 @@ internal static class Program
         var (retouched, hasRetouchedList) = LoadRetouchedList(manifest.RetouchedList);
 
         Console.WriteLine("扫描 + 指纹聚合中…");
-        var groups = FingerprintGrouper.Scan(manifest.Folders);
+        var groups = FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords);
         _total = groups.Count;
         Console.WriteLine($"扫描到 {groups.Sum(g => g.Files.Count)} 文件 → {_total} 指纹组");
         if (_total == 0) return 0;
