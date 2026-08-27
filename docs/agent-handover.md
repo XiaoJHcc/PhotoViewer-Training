@@ -6,6 +6,7 @@
 > （证据链台账，append-only）→ [transfer-failure-analysis.md](transfer-failure-analysis.md)（失败矩阵详尽版）。
 > **维护**：重大阶段交接时重写；本文版本 = 2026-08-02（台阶②封板 + 人话改写 + 人类线实测），
 > 2026-08-05 增补（水平度专项：§3 候选规则、§4 负知识四行、§5.2 实证、§6 噪声区纪律、§7 资产）。
+> 2026-08-27 增补（干净标签三件套已导出待盲评：§3 现状行、§5.1/5.4、§7 文件地图）。
 > **注意**：本文刻意不写"后续具体计划"——方向与判据在此，怎么走由你判断。
 
 ---
@@ -30,7 +31,7 @@
 
 - **星级是段内锦标赛逐轮晋级的"生存结果"**：强段内相对信号、几乎为零的跨段绝对信号；
   **只有排序、无数值意义**（禁相减/平均/回归/跨组数值比较，只可反推生成过程后按序使用）。
-- **清洁度与代表身份绑定**：相似团（段内 cos≥0.88 union-find，2569 团）内落败者的低星含
+- **清洁度与代表身份绑定**：相似团（段内 cos≥0.88 union-find，7006 团）内落败者的低星含
   "重复压低"成分；**团顶与孤立照的原始星级干净，是绝对尺唯一合法学习源**。
 - **团内旧标签约三成冠军位错误（两批金标准实测 0.732/0.658）**：失真集中在好片带（剔除琐碎后 0.61）
   与极相似带；**团内旧标签作 ground truth 已作废**，干净考卷 = `golden_exam/`（73 团）。
@@ -61,6 +62,12 @@
   M2 造出统一的尺 → 蒸馏该尺 + 系综 = 台阶①（0.755→0.766）→ 金标准实测旧标签噪声并换真尺
   → 台阶②重估接近可用 → 改进三臂全灭（困境实证）→ **模型侧空间封板，剩余杠杆在数据侧**
   → 水平度带条件规则 = 第一条实证的非模型信号（候选 0.53/0.92/0.93，2026-08-05）。
+- **2026-08-27 增补（三件套已导出，待用户三轮盲评）**：批3 盲选 `golden_star3/` 190 团 657 张
+  （考卷 +40 加密极相似带 / 训练 150 团冲 ~1000 干净对）；人类线复测卷 `golden_retest/` 73 团
+  （同卷重标，钉死人类线分母）；M2 扩锚池 `m2_pool_ext/` 245+29 张（13 新事件段覆盖 83%）。
+  读回链路已全部参数化（readback 认 [GHIR]、pair_gen --star-dir、exam_merge 支持 b3、
+  复测分析 golden_retest_eval.py）。用户标完后依次：读回 → 干净对合并 → 考卷 73→113 →
+  M2 全库重拟合（ext NaN 占位作废）→ M3 derived 重生成（新事件解锁）→ 水平度规则复核 → 重考。
 
 ## 4. 已证死方向（负知识，勿重开）
 
@@ -90,23 +97,24 @@
 ## 5. 待尝试 / 验证的草案（开放，由你判断优先级与做法）
 
 1. **数据飞轮（优先级已修正，2026-08-17）**：**干净团标签 > 盲评锚点 > 体量**——飞轮首考（17.2 万对）
-   证明体量非瓶颈（扭曲源=锦标赛标签冠军位噪声）。要做的是：金标准批3 盲选（加密极相似带）
-   + 新 13 事件 M2 盲评扩锚（`m2_latent_ext.py` NaN 占位待正式拟合替换；扩锚后 derived 尺才放进新事件）。
-   2025 批 13 事件已入库（库 25302 组，manifest.2025-pending.json，excludeKeywords 机制）。
+   证明体量非瓶颈（扭曲源=锦标赛标签冠军位噪声）。**2026-08-27 三件套已导出**：金标准批3
+   （`golden_star3/` 190 团，考卷加密极相似带 + 训练对冲上量）+ 新 13 事件 M2 扩锚池
+   （`m2_pool_ext/` 245 锚，段覆盖 83%，评完追加合并原池后 `m2_offset_fit` 全库重拟合，
+   `latent_scores_ext.csv` NaN 占位作废）。2025 批 13 事件已入库（库 25302 组，
+   manifest.2025-pending.json 为 JSONC 含注释行，Python 读取走 `load_roots_jsonc`）。
 2. **DINO×CV 分块融合（用户处方，已验亮点）**：`m5_lora.py --head cvfuse`（patch 与 CV 32×32 逐格
    对齐、残差融合、端到端学、无特判）——R2 极相似带 ≤1=1.00 证明 CV 通道可教技术判别；
    数据上量后这是首选重训架构。**水平度（2026-08-05 已验证）**：EXIF 横滚在极相似带（cos≥0.96）
-   判别力实证（带内 exact 0.78 vs 系综 0.44，带外反预测），带条件候选规则考卷 0.53/0.92/0.93 待考卷扩充复核；
-   全库姿态资产 `D:/PhotoDB/dataset/accel_export.csv`（ILCE-6100 无 0x940F 数据，"未知轴序"无对象收敛）+
-   CV 地平线 `audit/out/horizon/`（`horizon_cv.py`/`horizon_eval.py`）；重训时可作 CV 网格增量。
-   **首试已做（2026-08-05 晚，判负）**：12 通道 cvfuse（EXIF 横滚/CV 地平线/置信度入格）按 R2 配方
-   重训 → 带内 0.56 不及手工规则 0.78，混合 0.49 < 规则候选 0.53；325 对规模下学习融合无可辨增益，
+   判别力实证（带内 exact 0.78 vs 系综 0.44，带外反预测），带条件候选规则考卷 0.53/0.92/0.93
+   **待批3 考卷加密后复核**（带内 n=9 → ~35+）；
+   全库姿态资产 `D:/PhotoDB/dataset/accel_export.csv`（ILCE-6100 无 0x940F 数据）+
+   CV 地平线 `audit/out/horizon/`；重训时可作 CV 网格增量。
+   **首试已做（判负）**：12 通道 cvfuse 按 R2 配方重训，325 对规模下学习融合无可辨增益，
    架构+`audit/band_hybrid.py` 混合评估器沉淀，**上量后复核**（带内三判官错误互补的机制证据仍在）。
-   **融合上限的机制证据（同日）**：带内水平度（0.78）/抖动 drag_width（0.78）/系综（0.44）三判官
-   错误组互不重叠（H011/H014 vs H004/H013 vs 其余）——空间加权融合理论上限高于任一单信号手工规则。
 3. **台阶① 可用性验收实验**：强/弱二分后看人工复核率，把 0.766 从数字变成"敢不敢用"的证据。
-4. **团内人类线复测**：同人同卷、数周后重标一批金标准团（记忆冲刷），测严格的团内复测一致性
-   （现用跨年上界 0.66-0.73/0.93）——把"达到人类线即可用"的判据钉死。
+4. **团内人类线复测**：**复测卷已导出（2026-08-27，`golden_retest/` 73 团 R### 重洗防记忆锚定）**；
+   用户重标后跑 `audit/golden_retest_eval.py` 得同卷复测冠军/前二一致率，
+   替换跨年上界（0.66-0.73/0.93），把"达到人类线即可用"的判据钉死。
 5. **金标准集攒集（七类场景）**：宪法 §0.5 七类场景各攒代表样本，**必须从 test 事件取**（决策 11）；
    后续外拍保留原始 dump（废片闸门校准与金标准废片组唯一来源）。
 6. **废片闸门**（未建，CV/规则路线，与审美模型无关）——产品化前置项，当前阶段规则下暂缓。
@@ -148,8 +156,8 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10-§11 = 训练阶段总叙事**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / m2_offset_fit / m3_pair_gen / **abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback/cluster_eval/batch2_sampler/exam_merge/exam_eval/pair_gen——金标准全链）/ horizon_cv（CV 地平线检测）+ horizon_eval（水平度考卷评估+候选规则）+ cv_sharpness_eval（锐度/抖动规则负知识，2026-08-05）** |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / **m2_pool_builder_ext（新事件扩锚池，2026-08-27）** / m2_offset_fit / m3_pair_gen / abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback[认 GHIR]/cluster_eval/batch2_sampler/**batch3_sampler（2026-08-27）**/exam_merge[支持 b3]/exam_eval/pair_gen[已参数化]）/ **golden_retest_export + golden_retest_eval（人类线同卷复测，2026-08-27）** / horizon_cv + horizon_eval + cv_sharpness_eval |
 | `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估；开关全：`--seed/--w-abs/--abs-min-d/--w-golden/--full-ft/--init-from/--freeze-all/--head cls|patch|cvfuse`）** · **m8_ensemble.py（系综+三级台阶考卷）** · m6_adapt_sim.py · m7_extprobe.py（CLIP+LAION 先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
 | `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** + **`--dump-accel`（姿态导出：机型+0x940F 三轴/横滚 → CSV，纯 EXIF 不解码不悬挂，2026-08-05）** |
-| `D:/PhotoDB/dataset/` | photos_dataset.db（9418 组四路特征+标签） · render518/（9418 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **golden_exam/（73 团标准考卷，永久不入训）** · golden_star/golden_star2（批1/批2 标星集+读回明细） · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |
-| 关键数据资产 | `audit/out/m3_pairs/`（train 60180/val 1771/test 9542 + photos.csv） · `audit/out/abs_pairs/`（A1：train 20467/val 54/test 924） · **`audit/out/golden_pairs/`（325 对确信度加权干净对）** · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分） · `audit/out/clusters/clusters.csv`（2569 团） · `train/out/m8_best/`（当前最优系综产物） · **`D:/PhotoDB/dataset/accel_export.csv`（9418 组姿态：7128 有横滚，2026-08-05）** · `audit/out/horizon/cv_horizon_full.csv`（全库 CV 地平线） |
+| `D:/PhotoDB/dataset/` | photos_dataset.db（25302 组四路特征+标签） · render518/（25302 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings） · **m2_pool_ext/（2025 批扩锚池 274 张待评 + m2_pool_ext_key.csv，2026-08-27）** · golden_exam/（73 团标准考卷，永久不入训；批3 读回后 →113 团） · golden_star/golden_star2（批1/批2 标星集+读回明细） · **golden_star3/（批3 盲选 190 团 657 张待标 + golden_batch3_key.csv，2026-08-27）** · **golden_retest/（人类线复测卷 73 团 224 张待标 + golden_retest_key.csv，2026-08-27）** · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |
+| 关键数据资产 | `audit/out/m3_pairs/`（train window 72702/global 80914/derived 18595 · val 5473+2936 · test 9543 + photos.csv，2026-08-16 重生成） · `audit/out/abs_pairs/`（A1：train 20467/val 54/test 924） · **`audit/out/golden_pairs/`（325 对确信度加权干净对；批3 读回后 ~1000）** · `audit/out/m2_offset_clean/latent_scores.csv`（反泄漏干净潜分；新事件扩锚后全库重拟合） · `audit/out/clusters/clusters.csv`（7006 团） · `train/out/m8_best/`（当前最优系综产物） · **`D:/PhotoDB/dataset/accel_export.csv`（25302 组姿态：18876 有横滚）** · `audit/out/horizon/cv_horizon_full.csv`（全库 CV 地平线） |

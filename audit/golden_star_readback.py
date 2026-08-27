@@ -30,7 +30,7 @@ KEY = GC_DIR / "golden_clusters_key.csv"
 
 PAT_ELEM = re.compile(rb"<xmp:Rating>([-0-9]+)</xmp:Rating>")
 PAT_ATTR = re.compile(rb'xmp:Rating="([-0-9]+)"')
-PAT_NAME = re.compile(r"^([GH]\d{3})_([A-F])\.[^.]+$")
+PAT_NAME = re.compile(r"^([GHIR]\d{3})_([A-F])\.[^.]+$")   # G=批1 H=批2 I=批3 R=复测卷
 
 
 def read_rating(path: Path) -> int:

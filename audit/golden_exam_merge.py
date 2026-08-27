@@ -1,5 +1,5 @@
 """
-golden_exam_merge.py — 合并金标准考试集：批1（48 团 G，全 test）+ 批2 test 团（25 团 H）
+golden_exam_merge.py — 合并金标准考试集：批1（48 团 G，全 test）+ 批2 test 团（25 团 H）+ 批3 test 团（40 团 I，读回后并入）
 
 产出 D:/PhotoDB/dataset/golden_exam/：
   golden_exam_key.csv       合并真值键（gid,anon,fingerprint,event,…,rating,batch,cos,lat_q）
@@ -15,6 +15,7 @@ from pathlib import Path
 GC = Path("D:/PhotoDB/dataset/golden_clusters")
 GS1 = Path("D:/PhotoDB/dataset/golden_star")
 GS2 = Path("D:/PhotoDB/dataset/golden_star2")
+GS3 = Path("D:/PhotoDB/dataset/golden_star3")
 OUT = Path("D:/PhotoDB/dataset/golden_exam")
 
 
@@ -46,6 +47,20 @@ def main() -> int:
             r["batch"] = "b2"
             k2.append(r)
     keys = k1 + k2
+    rb = read_tsv(GS1 / "golden_star_readback.tsv") + \
+        [r for r in read_tsv(GS2 / "golden_star_readback.tsv") if r[0] in test_gids]
+    n_b3 = 0
+    gs3_key = GS3 / "golden_batch3_key.csv"
+    gs3_rb = GS3 / "golden_star_readback.tsv"
+    if gs3_key.exists() and gs3_rb.exists():   # 批3：用户标完读回后才并入
+        k3all = list(csv.DictReader(open(gs3_key, encoding="utf-8-sig")))
+        test3 = {r["gid"] for r in k3all if r["split"] == "test"}
+        for r in k3all:
+            if r["gid"] in test3:
+                r["batch"] = "b3"
+                keys.append(r)
+        rb += [r for r in read_tsv(gs3_rb) if r[0] in test3]
+        n_b3 = len(test3)
     fields = list(keys[0])
     for r in keys:
         for f_ in r:
@@ -59,8 +74,6 @@ def main() -> int:
         w.writeheader()
         w.writerows(keys)
 
-    rb = read_tsv(GS1 / "golden_star_readback.tsv") + \
-        [r for r in read_tsv(GS2 / "golden_star_readback.tsv") if r[0] in test_gids]
     with open(OUT / "golden_exam_readback.tsv", "w", encoding="utf-8") as f:
         f.write("gid\tanon\tfingerprint\tuser_star\torig_rating\tis_orig_top\tis_user_pick\tgroup_status\n")
         for r in rb:
@@ -68,7 +81,7 @@ def main() -> int:
 
     gids = {r["gid"] for r in keys}
     print(f"[OK] {OUT}：{len(gids)} 团（批1 {len(set(r['gid'] for r in k1))} + 批2test "
-          f"{len(test_gids)}）· {len(keys)} 张 · readback {len(rb)} 行")
+          f"{len(test_gids)} + 批3test {n_b3}）· {len(keys)} 张 · readback {len(rb)} 行")
     return 0
 
 
