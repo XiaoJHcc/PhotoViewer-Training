@@ -12,7 +12,7 @@
 
 ## 与产品 `photos.db` 的对齐关系
 
-数据集库由 [DatasetDatabase](../DatasetBuilder/DatasetDatabase.cs) 门面管理,是与产品 `PhotoDatabase`(见 [PhotoViewer/Core/Database/CLAUDE.md](../../PhotoViewer/Core/Database/CLAUDE.md))**完全解耦的独立库**,但刻意让核心表名/列名与产品对齐,方便 Python 侧沿用同一套读法。区别:
+数据集库由 [DatasetDatabase](../DatasetBuilder/DatasetDatabase.cs) 门面管理,是与产品 `PhotoDatabase`(见 [PhotoViewer/Core/Database/AGENTS.md](../../PhotoViewer/Core/Database/AGENTS.md))**完全解耦的独立库**,但刻意让核心表名/列名与产品对齐,方便 Python 侧沿用同一套读法。区别:
 
 1. **路径由清单指定**,不落 AppData——入库后不再触碰原始照片文件。
 2. `photos` 表在产品列之外**加了训练专用列**:`is_retouched`(精修命中)/ `source_rel_path`(相对路径)/ `event_label`(事件标签)/ `subject_label`(题材标签)/ `formats`(该指纹合一的格式集合)。

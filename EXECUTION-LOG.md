@@ -184,7 +184,7 @@
 
 ### 2026-07-19 · M2 标注池生成交付（205 件）：待用户盲评
 
-- **工具**：`Training/audit/m2_pool_builder.py`（seed 7 可复现；clusters.csv + abs_set_key 去重；复用 abs_set_sampler 的 Resolver/scrub_file；CLAUDE.md 补 audit/ 目录行）。
+- **工具**：`Training/audit/m2_pool_builder.py`（seed 7 可复现；clusters.csv + abs_set_key 去重；复用 abs_set_sampler 的 Resolver/scrub_file；AGENTS.md 补 audit/ 目录行）。
 - **池构成**（plan-3-2 §6 决策 3）：大团顶 64 + ≥3★ 孤立 52 + 低端孤立 30（weight_class=low）+ 异常段顶 37（<8 张段 ∪ ≤2★ 封顶段并集去重后实得）= **183 代表**；**暗放重复件 22**（12%，同 C 序列命名盲评不可辨，key 记 is_dup_of 互指兄弟副本）→ 合计 **205 件**：`D:\PhotoDB\dataset\m2_pool\`（C0001..C0205，shuffle 编号不泄露角色）；抹星 205/205 零残留（元素 187 / 属性 18）。key `D:/PhotoDB/dataset/m2_pool_key.csv`（role/weight_class/is_dup_of/orig_path 全）。
 - **分布**：大团顶集中 20240212(15)/重庆春天(23)/桃红柳绿(11)/绍兴(15)；异常段顶以重庆春天(18)为主——与结构审计一致（重庆春天低封顶段最多）。
 - **评级口径（排序制，宪法 §0.3 v1.7）**：水平相近同档、高档恒优于低档；0-5 数字随意用、数值无意义；与 abs_set 同一人同一工作流，两批约束可合并（跨批同尺由本池暗放重复件 + 拟合残差检验）。
