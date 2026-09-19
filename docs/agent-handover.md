@@ -53,12 +53,14 @@
 | 台阶 | 现状 | 关键数字 | 死活原因 |
 |---|---|---|---|
 | ① 高分段任意两张 | **站住** | **0.766**（derived Δ≥2，n=1422；配方带 0.755-0.766） | M2 校准尺可学 + 系综 + 只考真实差异区 |
-| ② 团内选优 | **接近可用** | 金标准考卷（**113 团 94 判定组**，2026-08-30 扩充）：**exact 0.47 / ≤1 0.87 / 前二 0.91**；**分层（2026-08-31 起为标准剖面；好片口径唯一 = 团顶原星≥4★）**：好片团(n=28) 0.39/0.86/**0.93**（人类线 0.538/0.923，**前二贴线、冠军为主差距**）· 烂片团(n=45) 0.51/0.93/0.96（冠军判别=CV 兜底域欠账）· 硬颠倒 0.346/软 0.462/冠军涉入 0.390。**候选水平度规则复核判死**（形态回归纯系综） | 瓶颈="学得进必扭曲"困境（见 §4）；剩余真实差距 = 好片团冠军 0.39→0.54 + CV 域冠军判别；干净对 1026 已就位待重考 |
+| ② 团内选优 | **接近可用（混合形态）** | **当前最优 = 带内 fw2ep2 + 带外 ens（`band_hybrid_fw2.md`）：考卷（113 团 94 判定组）0.51/0.86/0.93——前二 = 人类线 0.926；好片团 0.46/0.89/0.93（前二 = 人类线 0.923）**；ens 守擂 0.47/0.87/0.91；fw2 单体 0.49/0.76/0.83（困境三连）。**分层**：好片团冠军 0.46 vs 人类 0.538（主差距）· 烂片团 fw2 单体 0.60 > ens 0.51（CV 兜底域兑现）· 硬颠倒 0.346-0.353 | 瓶颈="学得进必扭曲"困境（单体第三次未反转）；剩余差距 = 好片团冠军 + CV 域冠军判别 |
 | ③ 团顶/孤立照绝对序 | **考卷扶正，弱相量化** | 绝对序考卷（`tops_exam_eval.py`，总体 8443 团顶∪孤立照）：ens test 硬对一致 0.690（44.5k 对）/ ≥4★ 召回 0.155（基线 0.131）/ 域B 0.690；fw1ep3 硬对 0.530 贴 chance | 高星团顶监督稀薄 + 跨段绝对信号先天为零；本域=产品主战场（去重后每张都过此尺） |
 
-- **当前最优形态（可复现）**：系综 = `m5_lora`(ep1) + `m5_lora_patch`(ep3) + `m7_extprobe`(LAION)
-  + `m4_l518_cls2`，各分数 z-score 均权。台阶① 产物 `train/out/m8_best/`；台阶①考卷 `train/m8_ensemble.py`；
-  台阶②考卷 `D:/PhotoDB/dataset/golden_exam/` + `audit/golden_exam_eval.py`（四层剖面）。
+- **当前最优形态（可复现）**：**混合 = 带内（cos≥0.96）fw2ep2 + 带外 ens**（`audit/band_hybrid.py`
+  产物 `audit/out/band_hybrid_fw2.md`）——考卷 0.51/0.86/0.93（前二 = 人类线），好片团前二 = 人类线。
+  ens = `m5_lora`(ep1) + `m5_lora_patch`(ep3) + `m7_extprobe`(LAION) + `m4_l518_cls2`，z-score 均权。
+  台阶① 产物 `train/out/m8_best/`；台阶①考卷 `train/m8_ensemble.py`；
+  台阶②考卷 `D:/PhotoDB/dataset/golden_exam/` + `audit/golden_exam_eval.py`（四层+分层+颠倒剖面）。
 - **水平度规则（2026-08-05 提出，2026-08-30 复核判死）**：极相似带（cos≥0.96）内 Δerr≥0.3° 改选最平者
   ——考卷加密（带内 n 9→28）后增益蒸发（0.47 vs 0.47），原 +6pt 在 ±11pt 噪声内；带内纯水平度 0.44
   不及带内系综 0.54。**机制事实仍成立**（带内 exif 判别力曾实测、三判官错误互补），
@@ -100,6 +102,8 @@
 | 水平度入 CV 网格重训 cvfuse（hz20，325 对规模） | 学习融合不及手工规则；带内差 R2 1 组在噪声内 | 带内 0.56 vs 规则 0.78；混合 0.49 < 0.53 |
 | 水平度带条件候选规则（Δerr≥0.3° 改选最平者） | **n=9 支撑的 +6pt 在 ±11pt 噪声内**——考卷加密（带内 n 9→28）复核：θ=0.3° exact 0.47 = 纯系综，带内纯水平度 0.44 不及带内系综 0.54（2026-08-30） | 0.47 vs 0.47；规则数字须 n≥25 才可信 |
 | 锦标赛标签加量重训（17.2 万对，fw1，2026-08-17） | **扭曲源=锦标赛标签冠军位 ~30% 噪声，非体量/热权重**（golden 占比稀释至 3.8% 扭曲签名不变） | 全局 ≤1 0.78 vs 0.88；带内 0.67 < 0.78；混合 0.51 < 0.53 |
+| 干净对 1026 + derived 全量重训（fw2，2026-09-19） | **单体困境三连未反转**——干净对量不是反转条件；但 CV 通道带内/烂片域真实增益 | fw2 单体 ≤1 0.76 vs 0.87；带内 exact 0.61（n=28 历史最佳）；混合 0.51/0.86/0.93 新最优 |
+| 全局 z 均权 blend（ens + fw2ep2） | fw2 扭曲拖垮系综——融合只能走带条件结构 | 0.46/0.81/0.86 < ens 0.47/0.87/0.91 |
 
 ## 5. 待尝试 / 验证的草案（开放，由你判断优先级与做法）
 
@@ -161,7 +165,7 @@
 | `Training/docs/analysis-story.md` | 人读叙事版（**§10-§11 = 训练阶段总叙事**） |
 | `Training/docs/transfer-failure-analysis.md` | 失败矩阵详尽版（为什么失败 + 证据） |
 | `Training/plans/` | plan-3-0 宪法（v1.9）→ 3-1（M1）→ 3-2（M2+M3）→ 3-3（M4+M5）→ 3-4（M6+M7，后置） |
-| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / **m2_pool_builder_ext（新事件扩锚池，2026-08-27）** / m2_offset_fit / m3_pair_gen / abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback[认 GHIR]/cluster_eval/batch2_sampler/**batch3_sampler（2026-08-27）**/exam_merge[支持 b3]/exam_eval/pair_gen[已参数化]/**order_eval[组内顺序颠倒口径，2026-08-30]**）/ **golden_retest_export + golden_retest_eval（人类线同卷复测，2026-08-27）** / **tops_exam_eval（绝对序考卷：团顶∪孤立照，台阶③扶正，2026-08-31）** / horizon_cv + horizon_eval + cv_sharpness_eval |
+| `Training/audit/` | data_audit / cluster_mine / abs_set_sampler / m2_pool_builder / **m2_pool_builder_ext（新事件扩锚池，2026-08-27）** / m2_offset_fit / m3_pair_gen / abs_pair_gen（A1 盲评对）/ golden 系列（sampler/star_export/star_readback[认 GHIR]/cluster_eval/batch2_sampler/**batch3_sampler（2026-08-27）**/exam_merge[支持 b3]/exam_eval/pair_gen[已参数化]/**order_eval[组内顺序颠倒口径，2026-08-30]**）/ **golden_retest_export + golden_retest_eval（人类线同卷复测，2026-08-27）** / **golden_mv_eval（三轮多数决真值考卷，2026-09-19）** / **tops_exam_eval（绝对序考卷：团顶∪孤立照，台阶③扶正，2026-08-31）** / horizon_cv + horizon_eval + cv_sharpness_eval |
 | `Training/train/` | **m5_lora.py（LoRA 训练+同口径评估；开关全：`--seed/--w-abs/--abs-min-d/--w-golden/--full-ft/--init-from/--freeze-all/--head cls|patch|cvfuse`）** · **m8_ensemble.py（系综+三级台阶考卷）** · m6_adapt_sim.py · m7_extprobe.py（CLIP+LAION 先验探针） · render_cache.py（渲染闸门+路径解析） · m4_baseline.py（冻结特征基线，评估函数被复用） |
 | `Training/DatasetBuilder/` | 入库管线 + **`--dump-render`（渲染缓存正路）** + **`--dump-accel`（姿态导出：机型+0x940F 三轴/横滚 → CSV，纯 EXIF 不解码不悬挂，2026-08-05）** |
 | `D:/PhotoDB/dataset/` | photos_dataset.db（25302 组四路特征+标签） · render518/（25302 PNG 缓存） · abs_set/m2_pool（盲评集+key+ratings，**m2_pool 已合并扩锚 274 → 479 锚**，备份 .backup-2026-09-19） · m2_pool_ext/（扩锚池源文件夹+key，已封板） · golden_exam/（**113 团**标准考卷，永久不入训） · golden_star/golden_star2/golden_star3（批1/2/3 标星集+读回明细，批3 已读回） · golden_retest/（人类线复测卷，已封板 0.704/0.926） · golden_clusters/（仅 key.csv 真值键） · models/（ONNX + LAION 头） |
