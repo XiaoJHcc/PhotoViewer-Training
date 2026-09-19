@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# .NET 构建输出
+[Bb]in/
+[Oo]bj/
+.vs/
+
+# 训练/探针/审计输出（大文件，仅本地保留）
+probes/out*/
+audit/out/
+train/out/
