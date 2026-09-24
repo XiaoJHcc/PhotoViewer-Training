@@ -55,7 +55,7 @@ def main() -> int:
     split = json.load(open(ROOT / "audit" / "out" / "m3_pairs" / "split.json", encoding="utf-8"))
     ev_split = {ev: s for s, evs in split.items() for ev in evs}
 
-    used = {(r["event"], int(r["seg_id"]), int(r["cluster_id"]))
+    used = {r["fingerprint"]
             for r in csv.DictReader(open(BATCH1_KEY, encoding="utf-8-sig"))}
 
     rows = list(csv.DictReader(open(ROOT / "audit" / "out" / "clusters" / "clusters.csv",
@@ -90,7 +90,7 @@ def main() -> int:
     # 候选团卡：key, members, split, cos, 潜分带(中位数分位)
     cand = []
     for key, members in by_cluster.items():
-        if key in used:
+        if any(member["fingerprint"] in used for member in members):
             continue
         fps = [m["fingerprint"] for m in members]
         if any(f not in ok_map or f not in lat or f not in cls for f in fps):

@@ -78,7 +78,7 @@ def main() -> int:
     used = set()
     for p in USED_KEYS:
         for r in csv.DictReader(open(p, encoding="utf-8-sig")):
-            used.add((r["event"], int(r["seg_id"]), int(r["cluster_id"])))
+            used.add(r["fingerprint"])
 
     rows = list(csv.DictReader(open(ROOT / "audit" / "out" / "clusters" / "clusters.csv",
                                     encoding="utf-8-sig")))
@@ -117,7 +117,7 @@ def main() -> int:
     # 候选团卡：key, members, split, cos, 带（潜分分位；NaN → 团顶星级带）
     cand = []
     for key, members in by_cluster.items():
-        if key in used:
+        if any(member["fingerprint"] in used for member in members):
             continue
         fps = [m["fingerprint"] for m in members]
         if any(f not in ok_map or f not in lat or f not in cls for f in fps):
