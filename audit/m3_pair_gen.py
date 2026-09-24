@@ -5,9 +5,10 @@ m3_pair_gen.py — M3 训练对生成（plan-3-2 §6.2 v1.0 + 宪法 §0.3 v1.8 
      + 干净潜分（m2_offset_fit --exclude-events 对 test/val 锚点剔除后的 latent_scores，
        决策 9 反泄漏条款）+ S-orig CLS（cos 相似度）。
 
-split（决策 9，草案待用户确认）：test = {2026-3-14 茶博, 2026-4-19 虎跑, 2026-4-25 良渚版本}，
-val = {2026-1-10 祥睦桥}，train = 其余 7 事件。**金标准集后续必须从 test 事件取**（决策 11）。
-所有配对两端同 split（test/val 事件的对只作 M4 评估集）。
+split：默认不传参数时沿用脚本内旧 split，仅为兼容历史复现实验；当前开发实验使用
+`data/split-v2-20260924.json` 通过 `--split-json` 传入事件级 train/val/test。
+所有配对两端同 split；严格留出时传 `--derived-splits train`，避免把 M2 派生监督带入 val/test。
+v2 是开发划分，不是完全未接触的终考；旧考卷只做回归，真正终考需在模型冻结后另留事件。
 
 配对类型（参数全冻结，§6.2 决策 5-8）：
     A. window  段内滑窗对（高权）：段内时间序滑窗 20 张，rating 不同；cos<0.73 → w=0 排除，
@@ -30,7 +31,9 @@ val = {2026-1-10 祥睦桥}，train = 其余 7 事件。**金标准集后续必�
     split.json        事件 → split 映射
 
 用法（仓根 D:/Git/PhotoViewer 下）：
-    PYTHONUTF8=1 Tools/.venv/Scripts/python.exe Training/audit/m3_pair_gen.py
+    PYTHONUTF8=1 Tools/.venv/Scripts/python.exe Training/audit/m3_pair_gen.py \
+        --split-json Training/data/split-v2-20260924.json \
+        --derived-splits train
 """
 from __future__ import annotations
 
@@ -114,9 +117,27 @@ def load_all(args):
         except (TypeError, ValueError):
             continue
         photos.append(dict(fp=fp, t=t, **m, **clus[fp], b=lat[fp][0], s=lat[fp][1]))
+    if args.split_json:
+        split_config = json.loads(Path(args.split_json).read_text(encoding="utf-8"))
+        assigned_events = [event for split in ("train", "val", "test")
+                           for event in split_config[split]]
+        if len(assigned_events) != len(set(assigned_events)):
+            raise ValueError("split 配置事件重复，不能跨集合或在集合内重复出现")
+        split_of = {event: split for split in ("train", "val", "test")
+                    for event in split_config[split]}
+    else:
+        split_config = {"test": TEST_EVENTS, "val": VAL_EVENTS}
+        split_of = {event: "test" for event in TEST_EVENTS}
+        split_of.update({event: "val" for event in VAL_EVENTS})
+        split_of.update({p["event"]: "train" for p in photos
+                         if p["event"] not in split_of})
+    actual_events = {p["event"] for p in photos}
+    if set(split_of) != actual_events:
+        raise ValueError(f"split 配置事件不完整或有多余事件: missing={sorted(actual_events - set(split_of))} extra={sorted(set(split_of) - actual_events)}")
+    if set(split_config.get("legacy_regression_events", [])) - actual_events:
+        raise ValueError("legacy_regression_events 含未知事件")
     for p in photos:
-        p["split"] = ("test" if p["event"] in TEST_EVENTS
-                      else "val" if p["event"] in VAL_EVENTS else "train")
+        p["split"] = split_of[p["event"]]
         p["feat"] = l2_normalize(feats[p["fp"]])
     return photos
 
@@ -144,7 +165,7 @@ def load_anchor_gap_threshold(photos, args) -> float:
 
 # ---------------------------------------------------------------------------
 
-def gen_pairs(photos, thr):
+def gen_pairs(photos, thr, derived_splits=None):
     """生成三类对。返回 list[dict]（含 split/ptype/weight/诊断列）。"""
     idx_of = {p["fp"]: i for i, p in enumerate(photos)}
     F = np.stack([p["feat"] for p in photos])
@@ -227,7 +248,10 @@ def gen_pairs(photos, thr):
         if p["is_top"]:
             by_split[p["split"]].append(i)
     seen = set()
+    allowed_derived = set(by_split) if derived_splits is None else set(derived_splits)
     for sp, ixs in by_split.items():
+        if sp not in allowed_derived:
+            continue
         s = np.array([photos[i]["s"] for i in ixs])
         for a, i in enumerate(ixs):
             cand = [ixs[b] for b in range(len(ixs))
@@ -261,6 +285,10 @@ def main() -> int:
     ap.add_argument("--abs-key", default=ABS_KEY_DEFAULT)
     ap.add_argument("--abs-tsv", default=ABS_TSV_DEFAULT)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "out" / "m3_pairs"))
+    ap.add_argument("--split-json", default=None,
+                    help="事件级 train/val/test 配置；不传则沿用脚本内旧 split")
+    ap.add_argument("--derived-splits", nargs="+", choices=("train", "val", "test"), default=None,
+                    help="只在哪些 split 生成 M2 派生对；严格留出时通常只传 train")
     args = ap.parse_args()
 
     photos = load_all(args)
@@ -268,7 +296,7 @@ def main() -> int:
           f"{sum(p['split']=='train' for p in photos)}/{sum(p['split']=='val' for p in photos)}"
           f"/{sum(p['split']=='test' for p in photos)}")
     thr = load_anchor_gap_threshold(photos, args)
-    pairs, idx_of = gen_pairs(photos, thr)
+    pairs, idx_of = gen_pairs(photos, thr, args.derived_splits)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -316,7 +344,7 @@ def main() -> int:
         wsum[pr["split"]][pr["ptype"]] += pr["weight"]
 
     L = ["# M3 训练对生成报告（plan-3-2 §6.2）\n"]
-    L.append(f"- split：test={TEST_EVENTS} · val={VAL_EVENTS} · train=其余；照片 {len(photos)}")
+    L.append(f"- split：test={sorted({p['event'] for p in photos if p['split'] == 'test'})} · val={sorted({p['event'] for p in photos if p['split'] == 'val'})} · train=其余；照片 {len(photos)}")
     L.append(f"- 派生阈值 |Δs|>{thr:.3f}；τ_cv={TAU_CV}；window={WINDOW}；w_global={W_GLOBAL}；w_derived={W_DERIVED}\n")
     L.append("## 配对计数（按 split × 类型）\n| split | window | global | derived | 合计 |\n|---|---|---|---|---|")
     for sp in ("train", "val", "test"):
@@ -328,13 +356,14 @@ def main() -> int:
     L.append(f"- tie 残留（cos≥0.98 且 cv<{TAU_CV}）：**{n_tie_left}**（应 0）")
     L.append(f"- derived 非清洁 / 同团：**{n_der_dirty} / {n_der_sameclu}**（应 0/0）")
     L.append(f"- 孤儿照片（无任何对）：**{len(orphans)}**（{dict(sorted(orb_by_rating.items()))}）")
-    L.append(f"- 金标准集约束：待攒集，**必须落在 test 事件**（{TEST_EVENTS}）——决策 11")
+    L.append("- 金标准集约束：旧考卷盲评标签不在本生成器输入中；v2 含旧考卷事件的原星，不再据旧考卷报独立泛化")
     gate_ok = (n_cross == 0 and n_win_seg == 0 and n_tie_left == 0
                and n_der_dirty == 0 and n_der_sameclu == 0)
     L.append(f"\n**M3 GATE：{'PASS' if gate_ok else 'FAIL（见上）'}**")
     (out / "m3_report.md").write_text("\n".join(L) + "\n", encoding="utf-8")
     (out / "split.json").write_text(json.dumps(
-        {"test": TEST_EVENTS, "val": VAL_EVENTS,
+        {"test": sorted({p["event"] for p in photos if p["split"] == "test"}),
+         "val": sorted({p["event"] for p in photos if p["split"] == "val"}),
          "train": sorted({p["event"] for p in photos if p["split"] == "train"})},
         ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n[OK] {out}/m3_report.md + photos.csv + pairs_*.csv")

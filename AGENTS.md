@@ -12,7 +12,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 |---|---|
 | [DatasetBuilder/](DatasetBuilder/) | C# CLI:清单驱动扫描训练用照片文件夹 → 指纹聚合(RAW/HEIF/JPG 合一)→ EXIF/rating → DINO(原片 CLS + 增强 CLS + patch)→ CV grid → 写入独立数据集库 + 覆盖率报告。深度 `ProjectReference` 共享项目 `PhotoViewer/PhotoViewer.csproj`,提取算法与产品共演进,不允许分叉实现。 |
 | [probes/](probes/) | Python 特征可行性探针:`feature_probe.py`(线性探针 + t-SNE,判断 backbone/增强/多视图是否够分)、`spatial_probe.py`(空间感知头判别,复用 `feature_probe` 的配对/split 逻辑)、`abs_probe.py`(§1.5 绝对性探针:abs_set 重标星级 × CLS,事件级留出 LOEO 主口径,复用 `feature_probe` 助手)。`out/` 是每次运行的覆盖式输出(不入库)。 |
-| [audit/](audit/) | 数据审计与标注集构建:`data_audit.py`(M1 §1.4 分布审计+阈值校准)、`cluster_mine.py`(相似团挖掘+代表资格审计,M2 代表池地基)、`abs_set_sampler.py`/`abs_pair_sampler.py`(§1.5 重标集)、`m2_pool_builder.py`(M2 标注池生成)、`m2_offset_fit.py`(M2 排序制校准拟合+GATE,支持 --exclude-events 锚点反泄漏)、`m3_pair_gen.py`(M3 训练对生成+split)、`evaluation_protocol.py` + `protocol_eval.py`(冻结输入/哈希/严格覆盖/固定预算回归)、`golden_exam_eval.py`/`tops_exam_eval.py`(统一协议入口)、`band_hybrid.py`(组内上下文混合入口)、`global_pool_sampler.py`/`global_pool_readback.py`/`global_pair_task.py`(全局精品试点池、读回和跨组直接比较)。`out/` 覆盖式输出(不入库)。 |
+| [audit/](audit/) | 数据审计与标注集构建:`data_audit.py`(M1 §1.4 分布审计+阈值校准)、`cluster_mine.py`(相似团挖掘+代表资格审计,M2 代表池地基)、`abs_set_sampler.py`/`abs_pair_sampler.py`(§1.5 重标集)、`m2_pool_builder.py`(M2 标注池生成)、`m2_offset_fit.py`(M2 排序制校准拟合+GATE,支持 --exclude-events 锚点反泄漏)、`m3_pair_gen.py`(M3 训练对生成+split)、`split_inventory.py`(事件覆盖盘点与图片概览)、`evaluation_protocol.py` + `protocol_eval.py`(冻结输入/哈希/严格覆盖/固定预算回归)、`golden_exam_eval.py`/`tops_exam_eval.py`(统一协议入口)、`band_hybrid.py`(组内上下文混合入口)、`global_pool_sampler.py`/`global_pool_readback.py`/`global_pair_task.py`(全局精品试点池、读回和跨组直接比较)。`out/` 覆盖式输出(不入库)。 |
 | [onnx/](onnx/) | DINOv3 模型导出/校验:`export_dinov3_onnx.py` 从 HuggingFace/ModelScope 权重导出双输出(CLS + patch)ONNX;`verify_onnx_parity.py` 校验 PyTorch vs ONNX 一致性(cosine ≥ 0.999)。改动需同步 `PhotoViewer/Core/AI/DinoModelResources.cs`。 |
 | [notebooks/](notebooks/) | `cv_grid_design.ipynb` —— CV 网格设计 PoC(numpy 全量标量验证),已定型归档,不再迭代。 |
 | [train/](train/) | 模型训练脚本:`m4_baseline.py`(基线)、`m5_lora.py`(LoRA,含 cvfuse 分块融合头)、`m6_adapt_sim.py`、`m7_extprobe.py`(外部探针)、`m8_ensemble.py`(系综)、`render_cache.py`；`supervision_data.py`/`supervision_ablation.py`(按来源隔离、均衡曝光、事件留出监督对照)。`out/` 覆盖式输出(不入库)。 |
@@ -23,6 +23,8 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 | [STATUS.md](STATUS.md) | 进度真源(每次会话末重写,不追加):里程碑位置 / 最近 GATE / 下一步 / 等待用户项 / 已冻结参数。开工先读。 |
 
 ## 构建 / 运行入口
+
+- **v2 开发协议**：事件配置 `data/split-v2-20260924.json`；`audit/m3_pair_gen.py --split-json ... --derived-splits train`；`audit/abs_pair_gen.py` 按原始/扩充会话隔离横评并合并复测区间。`audit/split_eval.py` 复用统一协议作逐事件与固定预算评估；`train/split_supervision_probe.py` 运行固定 CLS、等步数、三种子的原监督/去派生/直接横评供料对照。
 
 - **构建**:`dotnet build Training.sln`(独立解决方案,仅含 `DatasetBuilder`;**不要**把它加进主 `PhotoViewer.sln`——`DatasetBuilder` 是 `net10.0-windows`,加进跨平台主 sln 会连累 Mac/iOS 头的构建)。
 - **运行提取**:`dotnet run --project DatasetBuilder -- --manifest <manifest.json>`(清单驱动,见 [DatasetBuilder/manifest.sample.json](DatasetBuilder/manifest.sample.json))或 `dotnet run --project DatasetBuilder -- <folder>... --scan-only`(只扫描不建库,快速核验批次分布)。

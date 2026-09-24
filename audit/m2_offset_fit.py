@@ -120,7 +120,7 @@ class OffsetModel:
         self.a, self.b = th[:5], th[5:]
 
     def g(self, r: np.ndarray) -> np.ndarray:
-        inc = np.exp(self.a)                  # 5 个正增量
+        inc = np.exp(np.clip(self.a, -20.0, 20.0))  # 5 个正增量，优化试探不得溢出
         gcum = np.concatenate([[0.0], np.cumsum(inc)])
         return gcum[r]
 
@@ -141,7 +141,7 @@ def fit(lib, constraints, seg_sizes, seg_event, n_seg, seed=SEED):
 
     def loss_grad(th):
         model.unpack(th)
-        inc = np.exp(model.a)
+        inc = np.exp(np.clip(model.a, -20.0, 20.0))
         gcum = np.concatenate([[0.0], np.cumsum(inc)])
         s = gcum[rating] + model.b[seg]
         d = s[ci] - s[cj]
@@ -151,7 +151,8 @@ def fit(lib, constraints, seg_sizes, seg_event, n_seg, seed=SEED):
         grad_a = np.zeros(5)
         for k in range(1, 6):
             coef = (sig * (rating[ci] >= k)).sum() - (sig * (rating[cj] >= k)).sum()
-            grad_a[k - 1] = coef * inc[k - 1]
+            grad_a[k - 1] = (coef * inc[k - 1]
+                             if -20.0 < model.a[k - 1] < 20.0 else 0.0)
         grad_b = np.bincount(seg[ci], weights=sig, minlength=n_seg) \
             - np.bincount(seg[cj], weights=sig, minlength=n_seg)
         # 事件内收缩先验：LAM_B * n_seg * (b_seg - mean_b_event)
@@ -194,8 +195,9 @@ def anchor_constraints(anchor_idx: list[int], anchor_new: list[int],
     return cons
 
 
-def cap_constraints(lib, n_seg) -> list[tuple[int, int, float]]:
+def cap_constraints(lib, n_seg, exclude_events=None) -> list[tuple[int, int, float]]:
     """大段封顶约束：同事件内（≥32张 & cap≥4）段顶 >（≥32张 & cap≤3）段顶。"""
+    excluded = set(exclude_events or ())
     by_seg: dict[int, list[int]] = defaultdict(list)
     for ix, p in enumerate(lib):
         by_seg[p["seg"]].append(ix)
@@ -206,16 +208,18 @@ def cap_constraints(lib, n_seg) -> list[tuple[int, int, float]]:
             for s, ixs in by_seg.items()}
     cons = []
     for a in info:
-        if not (info[a]["n"] >= BIG_SEG and info[a]["cap"] >= 4):
+        if info[a]["event"] in excluded or not (info[a]["n"] >= BIG_SEG and info[a]["cap"] >= 4):
             continue
         for b in info:
-            if (info[b]["n"] >= BIG_SEG and info[b]["cap"] <= 3
+            if (info[b]["event"] not in excluded and info[b]["n"] >= BIG_SEG and info[b]["cap"] <= 3
                     and info[a]["event"] == info[b]["event"]):
                 cons.append((tops[a], tops[b], W_CAP))
     return cons
 
 
-def retouch_constraints(lib, seed=SEED) -> list[tuple[int, int, float]]:
+def retouch_constraints(lib, seed=SEED, exclude_events=None) -> list[tuple[int, int, float]]:
+    """生成事件内精修胜低星约束，整事件排除留出部分，返回带权偏好。"""
+    excluded = set(exclude_events or ())
     rng = np.random.default_rng(seed)
     low_by_ev: dict[str, list[int]] = defaultdict(list)
     for ix, p in enumerate(lib):
@@ -223,7 +227,7 @@ def retouch_constraints(lib, seed=SEED) -> list[tuple[int, int, float]]:
             low_by_ev[p["event"]].append(ix)
     cons = []
     for ix, p in enumerate(lib):
-        if not p["ret"]:
+        if not p["ret"] or p["event"] in excluded:
             continue
         pool = low_by_ev.get(p["event"], [])
         for jx in rng.choice(pool, size=min(5, len(pool)), replace=False):
@@ -279,7 +283,7 @@ def main() -> int:
     ap.add_argument("--w-d1", type=float, default=W_D1_DEFAULT,
                     help="Δ=1 锚点对权重因子（默认 0.5；1.0 = 不降权对照）")
     ap.add_argument("--exclude-events", default="",
-                    help="逗号分隔事件名：锚点反泄漏——这些事件的锚点（pool+abs）全部剔除后重拟合"
+                    help="逗号分隔事件名：这些事件的锚点、段级封顶与精修约束全部剔除后重拟合"
                          "（M4 对 test/val 事件的干净潜分用，plan-3-2 §6.2 决策 9 反泄漏条款）")
     args = ap.parse_args()
 
@@ -316,8 +320,9 @@ def main() -> int:
     a_w = [a["weight"] for a in fit_anchors]
 
     cons_a = anchor_constraints(a_idx, a_new, a_w, w_d1=args.w_d1)
-    cons_cap = cap_constraints(lib, n_seg)
-    cons_ret = retouch_constraints(lib)
+    excluded_events = set(args.exclude_events.split(",")) if args.exclude_events else set()
+    cons_cap = cap_constraints(lib, n_seg, excluded_events)
+    cons_ret = retouch_constraints(lib, exclude_events=excluded_events)
     print(f"约束: 锚点对 {len(cons_a)}（Δ=1 权重×{args.w_d1}）· 大段封顶 {len(cons_cap)} · 精修 {len(cons_ret)}")
 
     # ---------------- 全量拟合 ----------------
@@ -384,7 +389,7 @@ def main() -> int:
     # ---------------- 报告与产出 ----------------
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    inc = np.exp(model.a)
+    inc = np.exp(np.clip(model.a, -20.0, 20.0))
     gcum = np.concatenate([[0.0], np.cumsum(inc)])
     ev_b: dict[str, float] = {}
     for ev in sorted(set(seg_event.values())):

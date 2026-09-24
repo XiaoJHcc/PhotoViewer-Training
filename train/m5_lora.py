@@ -460,6 +460,9 @@ def main() -> int:
                     help="冻结 backbone+LoRA 只训头（防小样本集扭曲全局特征的交付机制）")
     ap.add_argument("--smoke", action="store_true", help="512 对 × 30 步冒烟，不评估")
     args = ap.parse_args()
+    multipliers = (args.w_window, args.w_global, args.w_derived, args.w_abs, args.w_golden)
+    if any(not np.isfinite(value) or value < 0 for value in multipliers):
+        raise ValueError("监督权重乘子必须为有限非负数")
 
     import torch
     from torch.utils.data import DataLoader
@@ -482,7 +485,8 @@ def main() -> int:
     # 监督重构（可选）：按 ptype 加权乘子——derived 主监督实验等
     wmul = {"window": args.w_window, "global": args.w_global, "derived": args.w_derived}
     if any(v != 1.0 for v in wmul.values()):
-        pairs_tr = [(fi, fj, y, w * wmul[pt], pt, d) for fi, fj, y, w, pt, d in pairs_tr]
+        pairs_tr = [(fi, fj, y, w * wmul[pt], pt, d) for fi, fj, y, w, pt, d in pairs_tr
+                    if wmul[pt] > 0]
         print(f"监督加权: {wmul}", flush=True)
     # E2 相似带专注：window 对只留 cos ≥ --min-cos（跨内容噪声对剔除）
     if args.min_cos > 0:
@@ -533,7 +537,9 @@ def main() -> int:
         for r in csv.DictReader(open(f"{args.abs_pairs}/pairs_train.csv", encoding="utf-8-sig")):
             if int(r["dstar"]) < args.abs_min_d:
                 continue
-            if r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp:
+            if (r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp
+                    and meta_by_fp[r["fp_i"]]["split"] == "train"
+                    and meta_by_fp[r["fp_j"]]["split"] == "train"):
                 abs_tr.append((r["fp_i"], r["fp_j"], 1, float(r["weight"]) * args.w_abs,
                                "abs", int(r["dstar"])))
         pairs_tr = pairs_tr + abs_tr
@@ -542,12 +548,16 @@ def main() -> int:
     if args.w_golden > 0:
         golden_tr = []
         for r in csv.DictReader(open(f"{args.golden_pairs}/pairs_train.csv", encoding="utf-8-sig")):
-            if r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp:
+            if (r["fp_i"] in meta_by_fp and r["fp_j"] in meta_by_fp
+                    and meta_by_fp[r["fp_i"]]["split"] == "train"
+                    and meta_by_fp[r["fp_j"]]["split"] == "train"):
                 golden_tr.append((r["fp_i"], r["fp_j"], 1, float(r["weight"]) * args.w_golden,
                                   "golden", int(r["dstar"])))
         pairs_tr = pairs_tr + golden_tr
         print(f"金标准干净对: {len(golden_tr)} 对 ×w{args.w_golden} 入训", flush=True)
     print(f"对: train {len(pairs_tr)} · val {len(pairs_va)} · test {len(pairs_te)}", flush=True)
+    if not pairs_tr:
+        raise ValueError("过滤后没有训练对")
 
     model, head, trainable = build_model(args.mid, device, args.head, args.full_ft)
     if args.init_from:
