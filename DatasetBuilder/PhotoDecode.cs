@@ -7,6 +7,7 @@ using LibHeifSharp;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
 using MetadataExtractor.Formats.Xmp;
+using PhotoViewer.Core.Image;
 
 namespace DatasetBuilder;
 
@@ -16,6 +17,9 @@ namespace DatasetBuilder;
 /// </summary>
 public static class PhotoDecode
 {
+    /// <summary>显示朝向解码版本；HEIF 平面尺寸和 JPEG EXIF 方向修复必须隔离旧缓存。</summary>
+    public const string Version = "display-plane-v3";
+
     /// <summary>可解码为位图的扩展名（RAW 只入身份/EXIF，不解码）。</summary>
     public static readonly string[] DecodableExtensions =
         [".jpg", ".jpeg", ".heif", ".heic", ".hif"];
@@ -77,7 +81,7 @@ public static class PhotoDecode
         }
     }
 
-    /// <summary>解码文件为全分辨率位图（HEIF 走 LibHeifSharp，其余走 Avalonia）。不可解码/失败返回 null。</summary>
+    /// <summary>解码为显示朝向全分辨率位图：HEIF 使用已旋转平面，JPEG 应用 EXIF 旋转/镜像。</summary>
     /// <param name="path">文件绝对路径。</param>
     /// <returns>已解码位图，调用方负责 Dispose。</returns>
     public static Bitmap? LoadBitmap(string path)
@@ -86,7 +90,20 @@ public static class PhotoDecode
         if (ext is ".heif" or ".heic" or ".hif")
             return DecodeHeif(path);
         using var stream = File.OpenRead(path);
-        return new Bitmap(stream);
+        var orientation = ImageOrientationInfo.FromDirectories(ImageMetadataReader.ReadMetadata(stream), false);
+        stream.Position = 0;
+        var bitmap = new Bitmap(stream);
+        if (orientation.RotationDegreesCw == 0 && !orientation.MirrorHorizontal)
+            return bitmap;
+        try
+        {
+            return ThumbnailService.ApplyOrientation(bitmap, orientation.RotationDegreesCw, orientation.MirrorHorizontal)
+                ?? throw new InvalidDataException($"无法应用图像方向: {path}");
+        }
+        finally
+        {
+            bitmap.Dispose();
+        }
     }
 
     /// <summary>
@@ -126,6 +143,9 @@ public static class PhotoDecode
         return null;
     }
 
+    /// <summary>按解码平面的实际尺寸和行步长复制 HEIF，避免旋转后的宽高与容器尺寸不一致。</summary>
+    /// <param name="path">HEIF 文件绝对路径。</param>
+    /// <returns>显示朝向位图，由调用方释放；解码失败返回 null。</returns>
     private static unsafe Bitmap? DecodeHeif(string path)
     {
         var data = File.ReadAllBytes(path);
@@ -135,9 +155,11 @@ public static class PhotoDecode
         using var image = handle.Decode(HeifColorspace.Rgb, HeifChroma.InterleavedRgb24);
         if (image == null) return null;
 
-        int w = (int)image.Width, h = (int)image.Height;
         var plane = image.GetPlane(HeifChannel.Interleaved);
+        int w = plane.Width, h = plane.Height;
         int stride = (int)plane.Stride;
+        if (w <= 0 || h <= 0 || stride < checked(w * 3) || plane.Scan0 == IntPtr.Zero)
+            throw new InvalidDataException($"无效 HEIF 解码平面: {path}");
 
         var wb = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96), Avalonia.Platform.PixelFormats.Bgra8888);
         using var locked = wb.Lock();

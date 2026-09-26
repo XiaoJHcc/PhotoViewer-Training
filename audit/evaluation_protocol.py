@@ -164,12 +164,15 @@ def abs_metrics(rows: list[dict], metadata: dict, scores: dict) -> dict:
             for domain, cross in (("same_event", False), ("cross_event", True))}
 
 
-def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.05, 0.125, 0.2, 0.3)) -> list[dict]:
-    """用模型自行选团代表后按预算筛选；旧星标签仅评价，不参与候选选择。"""
+def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.05, 0.125, 0.2, 0.3),
+                   representative_scores: dict | None = None, group_max: bool = False) -> list[dict]:
+    """用指定局部分数选代表、全局分数筛选；缺省共用分数，旧星只评价，不参与选择。"""
+    local_scores = scores if representative_scores is None else representative_scores
     results = []
     for event in sorted(events):
         members = {fingerprint: row for fingerprint, row in metadata.items() if row["event"] == event}
         require_coverage(scores, members)
+        require_coverage(local_scores, members)
         if not members:
             raise ValueError(f"事件无照片: {event}")
         groups = defaultdict(list)
@@ -177,8 +180,10 @@ def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.0
             groups[row["cluster_id"]].append(fingerprint)
         best_by_group = {}
         for group_id, fingerprints in groups.items():
-            best_by_group[group_id] = min(fingerprints, key=lambda fingerprint: (-scores[fingerprint], hashlib.sha256(fingerprint.encode()).hexdigest()))
-        representatives = sorted(best_by_group.values(), key=lambda fingerprint: (-scores[fingerprint], hashlib.sha256(fingerprint.encode()).hexdigest()), reverse=False)
+            best_by_group[group_id] = min(fingerprints, key=lambda fingerprint: (-local_scores[fingerprint], hashlib.sha256(fingerprint.encode()).hexdigest()))
+        ranking = {best_by_group[group_id]: max(scores[fp] for fp in fingerprints)
+                   if group_max else scores[best_by_group[group_id]] for group_id, fingerprints in groups.items()}
+        representatives = sorted(best_by_group.values(), key=lambda fingerprint: (-ranking[fingerprint], hashlib.sha256(fingerprint.encode()).hexdigest()), reverse=False)
         positives = {fingerprint for fingerprint, row in members.items() if int(row["rating_raw"]) >= 4}
         positive_groups = {members[fingerprint]["cluster_id"] for fingerprint in positives}
         positive_singletons = {fingerprint for fingerprint in positives if len(groups[members[fingerprint]["cluster_id"]]) == 1}

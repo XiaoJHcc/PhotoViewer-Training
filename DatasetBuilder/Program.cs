@@ -138,7 +138,14 @@ internal static class Program
     /// </summary>
     private static async Task<int> DumpRenderAsync(IngestManifest manifest, string dir, int? concurrencyOverride)
     {
+        string versionPath = Path.Combine(dir, "decode-version.txt");
+        if (System.IO.Directory.Exists(dir) && System.IO.Directory.EnumerateFileSystemEntries(dir).Any())
+        {
+            if (!File.Exists(versionPath) || File.ReadAllText(versionPath).Trim() != PhotoDecode.Version)
+                throw new InvalidDataException("渲染目录包含旧版本或无版本缓存；请使用新的输出目录，保留旧缓存用于对照。");
+        }
         System.IO.Directory.CreateDirectory(dir);
+        File.WriteAllText(versionPath, PhotoDecode.Version + Environment.NewLine);
         Console.WriteLine("扫描 + 指纹聚合中…");
         var groups = FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords);
         Console.WriteLine($"{groups.Count} 指纹组 → 渲染 {DinoModelResources.InputSize}px PNG → {dir}");
@@ -312,12 +319,12 @@ internal static class Program
             DinoFeatureExtractor.ConfigureModelOverride(File.ReadAllBytes(modelFile));
         }
         bool enhance = manifest.Enhance?.Enabled ?? true;
-        string modelId = modelIdOverride ?? DinoModelResources.ModelId;
+        string modelId = $"{modelIdOverride ?? DinoModelResources.ModelId}+decode-{PhotoDecode.Version}";
         // 后缀编入 ClipFactor 与色彩模型标记 ycc（YCbCr 保色度重建）+ SaturationScale：算法语义变了后缀即变 → 缓存自动失效、永不漂移。
         string? enhancedModelId = enhance
             ? $"{modelId}+clhe{ImageEnhancer.ClipFactor.ToString("0.0", CultureInfo.InvariantCulture)}ycc{ImageEnhancer.SaturationScale.ToString("0.0", CultureInfo.InvariantCulture)}"
             : null;
-        string cvSpec = CvGridResult.CurrentVersion;
+        string cvSpec = $"{CvGridResult.CurrentVersion}+decode-{PhotoDecode.Version}";
 
         var dbPath = Path.GetFullPath(manifest.DbPath);
         var db = new DatasetDatabase(dbPath);
@@ -331,6 +338,7 @@ internal static class Program
             ["color_model"] = "ycc-constant-chroma (ch' = Y' + s*(ch - Y))",
             ["cv_spec"] = cvSpec,
             ["dino_input_size"] = DinoModelResources.InputSize.ToString(CultureInfo.InvariantCulture),
+            ["decode_version"] = PhotoDecode.Version,
             // 一致性冻结点（Plan-3-1 §1.2 清单②）：增强施加在与 DINO/CV 同一张全分辨率解码位图上。
             ["enhance_resolution"] = "full-res-decode (same bitmap fed to DINO squash-to-518 and CV)",
         });
@@ -432,7 +440,7 @@ internal static class Program
                 {
                     var cvResult = await CvGridExtractor.ExtractAsync(bitmap);
                     cv = cvResult.Encode();
-                    cvSpecWritten = CvGridResult.CurrentVersion;
+                    cvSpecWritten = cvSpec;
                     cvW = bitmap.PixelSize.Width;
                     cvH = bitmap.PixelSize.Height;
                 }
