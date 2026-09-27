@@ -19,7 +19,7 @@ backbone 本身（LoRA 注入每层 attention q/k/v/o_proj），用 M3 训练对
     PYTHONUTF8=1 Tools/.venv-gpu/Scripts/python.exe Training/train/m5_lora.py --smoke
     PYTHONUTF8=1 Tools/.venv-gpu/Scripts/python.exe Training/train/m5_lora.py --epochs 3
 
-2026-07-28 增量臂（A1/A2/A3，见 docs/agent-handover.md §5 预留表）：
+2026-07-28 增量臂（A1/A2/A3；结论与负知识见 docs/KNOWLEDGE.md，标注资产见 docs/ANNOTATIONS.md）：
     --w-abs 1.0        A1：盲评绝对对（audit/out/abs_pairs，~2 万对胜者在前）入训
     --seed 1           A2：多种子（默认 0）
     --full-ft --lr-full 1e-5   A3：全量微调容量臂（不注 LoRA）
@@ -113,7 +113,7 @@ class CvFuseHead:
     让模型自己学"哪块的模糊/锐度该影响分数"（如主体锐度 vs 天然变化区），
     不做 CV 特判硬规则。cv 输入 [B,12,1024]：7 标量（NaN→0）+ 逐格 NaN 比例掩码
     + 水平度 4 通道（exif_err/exif_valid/cv_err/cv_conf，全局标量广播到逐格，
-    2026-08-05 增量——极相似带判别力已实证，见 docs/agent-handover.md §3）。"""
+    2026-08-05 增量——极相似带判别力实证与后续复核判死，见 docs/KNOWLEDGE.md）。"""
 
     @staticmethod
     def build(dim, n_reg):

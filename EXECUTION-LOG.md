@@ -1,6 +1,6 @@
 # 执行台账 Execution Log
 
-> **Append-only**——新记录一律追加在文件末尾,不修改/删除历史条目。用途:记录每次训练相关实验的数据/前提条件/命令/结果/解读/下一步,跨会话防遗忘。`Training/probes/out/` 每次运行覆盖式写,历史结论靠本台账留档,不靠 `out/` 里的旧文件。
+> **Append-only**——新记录一律追加在文件末尾,不修改/删除历史条目;被推翻的结论用新条目+指针纠正,不改旧条。用途:每次实验的**证据链底账**(数据/前提条件/命令/结果/解读/下一步),**允许事无巨细**,跨会话防遗忘。结论性知识沉淀到 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)、标注资产登记到 [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md)——本文档不承担知识索引职责(规范见 [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md))。`probes/out/`、`audit/out/`、`train/out/` 每次运行覆盖式写,历史结论靠本台账留档,不靠 `out/` 里的旧文件。
 
 ---
 
