@@ -2,7 +2,7 @@
 
 > **人读版叙事**：以论文式结构记录这个项目的发展——每章从当时的洞察或疑问出发，做了什么分析与尝试，得到什么数据，因此得出什么结论。只收录"改变过决策"的证据。
 > 写作约定：尽量说人话，避不开的专业词首次出现时附白话解释，文末附[名词表](#附名词表)；图中方框乱码是画图库缺中文字体所致。
-> 本文讲"怎么走到现在"，不讲"现在是什么"——当前候选数字与下一步见 [../STATUS.md](../STATUS.md)；结论与负知识的逐条登记见 [KNOWLEDGE.md](KNOWLEDGE.md)；需求与成功判据见 [REQUIREMENTS.md](REQUIREMENTS.md)；标注资产明细见 [ANNOTATIONS.md](ANNOTATIONS.md)；逐次实验证据链见 [../EXECUTION-LOG.md](../EXECUTION-LOG.md)。
+> 本文讲"怎么走到现在"，不讲"现在是什么"——当前候选数字与下一步见 [../STATUS.md](../STATUS.md)；结论与负知识的逐条登记见 [KNOWLEDGE.md](KNOWLEDGE.md)；需求与成功判据见 [REQUIREMENTS.md](REQUIREMENTS.md)；标注资产明细见 [SUPERVISION.md](SUPERVISION.md)；逐次实验证据链见 [../EXECUTION-LOG.md](../EXECUTION-LOG.md)。
 
 ---
 

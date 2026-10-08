@@ -1,6 +1,6 @@
 # AGENTS.md — Training
 
-> 模块内手册。跨模块联动(产品算法如何被训练消费、AI 特征如何入库)见主库根 [`AGENTS.md`](../AGENTS.md) §5.4；仓库简介与双仓维护注意见 [README.md](README.md)。
+> 训练模块内手册，该模块为 PhotoViewer 查看器项目的子模块。跨模块联动(产品算法如何被训练消费、AI 特征如何入库)见主库根 [`AGENTS.md`](../AGENTS.md) §5.4；仓库简介与双仓维护注意见 [README.md](README.md)。
 
 ## 模块职责
 
@@ -16,7 +16,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 | [onnx/](onnx/) | DINOv3 模型导出/校验:`export_dinov3_onnx.py` 从 HuggingFace/ModelScope 权重导出双输出(CLS + patch)ONNX;`verify_onnx_parity.py` 校验 PyTorch vs ONNX 一致性(cosine ≥ 0.999)。改动需同步 `PhotoViewer/Core/AI/DinoModelResources.cs`。 |
 | [notebooks/](notebooks/) | `cv_grid_design.ipynb` —— CV 网格设计 PoC(numpy 全量标量验证),已定型归档,不再迭代。 |
 | [train/](train/) | 模型训练脚本:`m4_baseline.py`(基线)、`m5_lora.py`(LoRA,含 cvfuse 分块融合头)、`m6_adapt_sim.py`、`m7_extprobe.py`(外部探针)、`m8_ensemble.py`(系综)、`render_cache.py`；`supervision_data.py`/`supervision_ablation.py`(按来源隔离、均衡曝光、事件留出监督对照)、`cache_visual_features.py`(带身份/哈希的可续跑 DINO+CLIP 特征缓存)、`personal_visual_ranker.py`(训练事件三折、来源均衡的个性化视觉排序器)。`out/` 覆盖式输出(不入库)。 |
-| [docs/](docs/) | 知识与叙事文档:[DOCUMENTATION.md](docs/DOCUMENTATION.md)(文档规范)、[REQUIREMENTS.md](docs/REQUIREMENTS.md)(需求锚点真源)、[ANNOTATIONS.md](docs/ANNOTATIONS.md)(标注资产全录)、[KNOWLEDGE.md](docs/KNOWLEDGE.md)(已确立结论+负知识墓碑表+已修正结论)、[analysis-story.md](docs/analysis-story.md)(人读论文式叙事)、[reviews/](docs/reviews/)(阶段审查归档,写入即冻结)。 |
+| [docs/](docs/) | 知识与叙事文档(三章按递进认知链划分,见 [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) §0):[HUMAN.md](docs/HUMAN.md)(用户亲笔真源,一切冲突以它为准)、[DOCUMENTATION.md](docs/DOCUMENTATION.md)(文档规范)、[REQUIREMENTS.md](docs/REQUIREMENTS.md)(链第一环:需求锚点真源)、[SUPERVISION.md](docs/SUPERVISION.md)(链第二/三环:习惯+先验登记+标注资产全录)、[KNOWLEDGE.md](docs/KNOWLEDGE.md)(链第四/五环:实测结论+数据特征+负知识墓碑表+可用信息总账)、[analysis-story.md](docs/analysis-story.md)(人读论文式叙事)、[reviews/](docs/reviews/)(阶段审查归档,写入即冻结)。 |
 | [plans/](plans/) | 三期计划文档(历史档案,已冻结):plan-3-0 宪法 + plan-3-1(M1 详案)+ plan-3-2/3-3/3-4 契约册,彼此用文件名相对链接;**现行需求真源已移交 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)**。一/二期基建历史与 copilot 原始讨论已归还主仓 [../Plans/](../Plans/)(考古专用;已否定方向收编在 plan-3-0 §3 附录),现行基建状态以根 `AGENTS.md` §5.4 为准。 |
 | [data/](data/) | 数据契约文档([data/README.md](data/README.md)):数据集库 schema、与产品 `photos.db` 的对齐关系、`dataset_meta` 版本化约定;入库批次台账([data/BATCHES.md](data/BATCHES.md)):批次源/题材/分组规则/特殊情况,每入库一批更新。数据本体在仓外 `D:\PhotoDB`。 |
 | [EXECUTION-LOG.md](EXECUTION-LOG.md) | 证据链台账(append-only):每次实验的数据/前提/命令/结果/解读/下一步,允许事无巨细,跨会话防遗忘;`probes/out/` 每次覆盖写,靠本台账留档历史结论。 |
@@ -44,15 +44,18 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 
 ## 文档地图
 
-> **新会话阅读顺序**:本文件 → [STATUS.md](STATUS.md);需要深度时按下表查知识文档。
+> **阅读纪律（强制，不可省略）**：
+> 1. **每会话开工**（含上下文压缩续接后）：全量重读本文件 → [STATUS.md](STATUS.md) → [docs/HUMAN.md](docs/HUMAN.md) → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)——需求锚点错了则全盘走偏，禁止凭记忆/摘要跳过。
+> 2. **探索新方向前**（新实验设计、新标注发起、新架构/新监督尝试）：必读 [docs/SUPERVISION.md](docs/SUPERVISION.md)（§0.2 先验登记 + 各集"得到了什么/中途启发"）与 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)（实测结论 + §6 负知识墓碑表）——新方向的启发与已证否的经验都在这里，重复已证死方向 = 浪费。
 
 | 文档 | 一句话职责 | 何时读 | 何时写 |
 |---|---|---|---|
 | [STATUS.md](STATUS.md) | 当前状态真源:位置/候选数字/下一步/等待项/冻结参数 | 每会话开工 | 每会话末重写 |
 | [EXECUTION-LOG.md](EXECUTION-LOG.md) | 实验证据链底账(append-only,允许事无巨细) | 追溯某次实验细节 | 每次实验追加 |
-| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求锚点与成功判据真源 | 对目标/判据有疑问时 | 用户裁定变化时 |
-| [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md) | 标注资产全录(协议/规模/位置/状态) | 用任何标注数据前必读 | 新标注集或规则变化时 |
-| [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md) | 已确立结论 + 负知识墓碑表 + 已修正结论 | 设计实验前必读(防重开已证死方向) | 结论确立或被推翻时 |
+| [docs/HUMAN.md](docs/HUMAN.md) | 用户亲笔真源（需求/先验/数据解读核心，不可漂移） | **每会话开工必读**（与 STATUS/REQUIREMENTS 同列强制） | 仅用户本人 |
+| [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) | 需求锚点与成功判据真源（认知链第一环） | **每会话全量重读**（含压缩续接） | 用户裁定变化时 |
+| [docs/SUPERVISION.md](docs/SUPERVISION.md) | 认知地基（§0.1 标注习惯 / §0.2 先验登记）+ 标注资产全录（各集含"得到了什么/中途启发"） | **探索新方向前必读**；用任何标注数据或引用先验前必读 | 新标注集、规则变化、新先验出现时 |
+| [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md) | 实测数据特征 + 已确立结论 + 负知识墓碑表 + 已修正结论 + 可用信息总账 | **探索新方向前必读**（墓碑表防重开已证死方向） | 结论确立或被推翻时（先验状态回流 SUPERVISION §0.2） |
 | [docs/analysis-story.md](docs/analysis-story.md) | 人读论文式叙事:怎么走到现在 | 想理解项目来龙去脉 | 重大阶段节点 |
 | [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) | 文档规范(写法/归属/推翻规程) | 写/改任何文档前 | 规范本身修订时 |
 | [docs/reviews/](docs/reviews/) | 阶段性审查归档(写入即冻结) | 需要审查原文时 | 新审查完成时(带日期) |
@@ -64,7 +67,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 - 规范真源:[docs/DOCUMENTATION.md](docs/DOCUMENTATION.md)(分层职责、各文档该写/不该写、推翻规程、新建文档规程、数字口径纪律)。
 - **[STATUS.md](STATUS.md)**:当前状态,每次会话末**重写**(不追加)。
 - **[EXECUTION-LOG.md](EXECUTION-LOG.md)**:证据链台账,**append-only**;每次实验记录数据/前提/命令/结果/解读/下一步。
-- **[data/BATCHES.md](data/BATCHES.md)**:每入库一批更新;标注资产或协议变化更新 [docs/ANNOTATIONS.md](docs/ANNOTATIONS.md);结论确立或被推翻更新 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)。
+- **[data/BATCHES.md](data/BATCHES.md)**:每入库一批更新;标注资产或协议变化更新 [docs/SUPERVISION.md](docs/SUPERVISION.md);结论确立或被推翻更新 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)。
 - **重大阶段节点**:更新 [docs/analysis-story.md](docs/analysis-story.md)。
 - **本文件**:目录职责、构建入口、契约、文档地图变化时同步更新;新建/删除/移动文档必须同笔更新上方文档地图。
 
