@@ -1,8 +1,6 @@
 using System;
 using System.IO;
 using System.Linq;
-using Avalonia;
-using Avalonia.Media.Imaging;
 using LibHeifSharp;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
@@ -12,7 +10,7 @@ using PhotoViewer.Core.Image;
 namespace DatasetBuilder;
 
 /// <summary>
-/// CLI 侧的裸文件 EXIF 读取 + 位图解码（不走产品的 ImageFile / IStorageFile 机制）。
+/// CLI 侧的裸文件 EXIF 读取 + 图像解码（不走产品的 ImageFile / IFileRef 机制）。
 /// 逻辑照搬自旧 BatchIngest：MetadataExtractor 直读 EXIF/XMP，LibHeifSharp 解 HEIF。
 /// </summary>
 public static class PhotoDecode
@@ -81,10 +79,10 @@ public static class PhotoDecode
         }
     }
 
-    /// <summary>解码为显示朝向全分辨率位图：HEIF 使用已旋转平面，JPEG 应用 EXIF 旋转/镜像。</summary>
+    /// <summary>解码为显示朝向全分辨率图像：HEIF 使用已旋转平面，JPEG 应用 EXIF 旋转/镜像。</summary>
     /// <param name="path">文件绝对路径。</param>
-    /// <returns>已解码位图，调用方负责 Dispose。</returns>
-    public static Bitmap? LoadBitmap(string path)
+    /// <returns>已解码图像，调用方负责 Dispose。</returns>
+    public static DecodedImage? LoadBitmap(string path)
     {
         var ext = Path.GetExtension(path).ToLowerInvariant();
         if (ext is ".heif" or ".heic" or ".hif")
@@ -92,17 +90,18 @@ public static class PhotoDecode
         using var stream = File.OpenRead(path);
         var orientation = ImageOrientationInfo.FromDirectories(ImageMetadataReader.ReadMetadata(stream), false);
         stream.Position = 0;
-        var bitmap = new Bitmap(stream);
+        var image = SkiaImageCodec.Decode(stream);
+        if (image == null) return null;
         if (orientation.RotationDegreesCw == 0 && !orientation.MirrorHorizontal)
-            return bitmap;
+            return image;
         try
         {
-            return ThumbnailService.ApplyOrientation(bitmap, orientation.RotationDegreesCw, orientation.MirrorHorizontal)
+            return SkiaImageCodec.ApplyOrientation(image, orientation.RotationDegreesCw, orientation.MirrorHorizontal)
                 ?? throw new InvalidDataException($"无法应用图像方向: {path}");
         }
         finally
         {
-            bitmap.Dispose();
+            image.Dispose();
         }
     }
 
@@ -145,8 +144,8 @@ public static class PhotoDecode
 
     /// <summary>按解码平面的实际尺寸和行步长复制 HEIF，避免旋转后的宽高与容器尺寸不一致。</summary>
     /// <param name="path">HEIF 文件绝对路径。</param>
-    /// <returns>显示朝向位图，由调用方释放；解码失败返回 null。</returns>
-    private static unsafe Bitmap? DecodeHeif(string path)
+    /// <returns>显示朝向图像，由调用方释放；解码失败返回 null。</returns>
+    private static unsafe DecodedImage? DecodeHeif(string path)
     {
         var data = File.ReadAllBytes(path);
         using var context = new HeifContext(data);
@@ -161,25 +160,24 @@ public static class PhotoDecode
         if (w <= 0 || h <= 0 || stride < checked(w * 3) || plane.Scan0 == IntPtr.Zero)
             throw new InvalidDataException($"无效 HEIF 解码平面: {path}");
 
-        var wb = new WriteableBitmap(new PixelSize(w, h), new Vector(96, 96), Avalonia.Platform.PixelFormats.Bgra8888);
-        using var locked = wb.Lock();
+        var pixels = new byte[(long)w * h * 4];
+        int dstStride = w * 4;
         var src = (byte*)plane.Scan0;
-        var dst = (byte*)locked.Address;
-        int dstStride = locked.RowBytes;
         for (int y = 0; y < h; y++)
         {
             var srcRow = src + y * stride;
-            var dstRow = dst + y * dstStride;
+            var dstRow = y * dstStride;
             for (int x = 0; x < w; x++)
             {
-                int si = x * 3, di = x * 4;
-                dstRow[di + 0] = srcRow[si + 2]; // B
-                dstRow[di + 1] = srcRow[si + 1]; // G
-                dstRow[di + 2] = srcRow[si + 0]; // R
-                dstRow[di + 3] = 255;            // A
+                int si = x * 3;
+                int di = dstRow + x * 4;
+                pixels[di + 0] = srcRow[si + 2]; // B
+                pixels[di + 1] = srcRow[si + 1]; // G
+                pixels[di + 2] = srcRow[si + 0]; // R
+                pixels[di + 3] = 255;            // A
             }
         }
-        return wb;
+        return new DecodedImage(pixels, w, h, dstStride, PixelEncoding.Bgra32);
     }
 }
 

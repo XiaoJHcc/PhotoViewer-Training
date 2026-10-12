@@ -133,7 +133,7 @@ internal static class Program
 
     /// <summary>
     /// 逐指纹组把代表件按 DINO 输入口径渲染成 PNG 缓存（梯4 LoRA 训练/评估用）：
-    /// 与 <see cref="DinoFeatureExtractor.RenderInputBitmap"/> 同一解码+缩放路径，保证训练像素 ≡ 部署像素。
+    /// 与 <see cref="DinoFeatureExtractor.RenderInputImage"/> 同一解码+缩放路径，保证训练像素 ≡ 部署像素。
     /// 幂等：已存在非空文件即跳过。
     /// </summary>
     private static async Task<int> DumpRenderAsync(IngestManifest manifest, string dir, int? concurrencyOverride)
@@ -176,9 +176,9 @@ internal static class Program
                     Console.WriteLine($"[FAIL] 解码失败: {g.Representative.RelPath}");
                     return;
                 }
-                using var rtb = DinoFeatureExtractor.RenderInputBitmap(bitmap);
+                using var input = DinoFeatureExtractor.RenderInputImage(bitmap);
                 using (var fs = File.Create(path))
-                    rtb.Save(fs);
+                    SkiaImageCodec.SavePng(input, fs);
                 int d = Interlocked.Increment(ref done);
                 if (d % 200 == 0 || d == groups.Count)
                     Console.WriteLine($"  [{d}/{groups.Count}] 跳过 {skip} · 失败 {fail}");
@@ -406,8 +406,8 @@ internal static class Program
                 return;
             }
 
-            Bitmap? bitmap = null;
-            Bitmap? enhanced = null;
+            DecodedImage? bitmap = null;
+            DecodedImage? enhanced = null;
             try
             {
                 bitmap = PhotoDecode.LoadBitmap(rep.Path);
@@ -441,8 +441,8 @@ internal static class Program
                     var cvResult = await CvGridExtractor.ExtractAsync(bitmap);
                     cv = cvResult.Encode();
                     cvSpecWritten = cvSpec;
-                    cvW = bitmap.PixelSize.Width;
-                    cvH = bitmap.PixelSize.Height;
+                    cvW = bitmap.Width;
+                    cvH = bitmap.Height;
                 }
 
                 await db.WriteIndexedAsync(group.Input, group.Fingerprint, modelId, enhancedModelId,
