@@ -12,11 +12,11 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 |---|---|
 | [DatasetBuilder/](DatasetBuilder/) | C# CLI:清单驱动扫描训练用照片文件夹 → 指纹聚合(RAW/HEIF/JPG 合一)→ EXIF/rating → DINO(原片 CLS + 增强 CLS + patch)→ CV grid → 写入独立数据集库 + 覆盖率报告。深度 `ProjectReference` 共享项目 `PhotoViewer/PhotoViewer.csproj`,提取算法与产品共演进,不允许分叉实现。 |
 | [probes/](probes/) | Python 特征可行性探针:`feature_probe.py`(线性探针 + t-SNE,判断 backbone/增强/多视图是否够分)、`spatial_probe.py`(空间感知头判别,复用 `feature_probe` 的配对/split 逻辑)、`abs_probe.py`(§1.5 绝对性探针:abs_set 重标星级 × CLS,事件级留出 LOEO 主口径,复用 `feature_probe` 助手)。`out/` 是每次运行的覆盖式输出(不入库)。 |
-| [audit/](audit/) | 数据审计与标注集构建:`data_audit.py`(M1 §1.4 分布审计+阈值校准)、`cluster_mine.py`(相似团挖掘+代表资格审计,M2 代表池地基)、`abs_set_sampler.py`/`abs_pair_sampler.py`(§1.5 重标集)、`m2_pool_builder.py`(M2 标注池生成)、`m2_offset_fit.py`(M2 排序制校准拟合+GATE,支持 --exclude-events 锚点反泄漏)、`m3_pair_gen.py`(M3 训练对生成+split)、`split_inventory.py`(事件覆盖盘点与图片概览)、`evaluation_protocol.py` + `protocol_eval.py`(冻结输入/哈希/严格覆盖/固定预算回归；预算支持局部代表分数与全局排序分数分离)、`golden_exam_eval.py`/`tops_exam_eval.py`(统一协议入口)、`band_hybrid.py`(组内上下文混合入口)、`global_pool_sampler.py`/`global_pool_readback.py`/`global_pair_task.py`(全局精品试点池、读回和跨组直接比较)。`out/` 覆盖式输出(不入库)。 |
+| [audit/](audit/) | 数据审计与标注集构建:`data_audit.py`(M1 §1.4 分布审计+阈值校准)、`cluster_mine.py`(相似团挖掘+代表资格审计,M2 代表池地基)、`abs_set_sampler.py`/`abs_pair_sampler.py`(§1.5 重标集)、`m2_pool_builder.py`(M2 标注池生成)、`m2_offset_fit.py`(M2 排序制校准拟合+GATE,支持 --exclude-events 锚点反泄漏)、`m3_pair_gen.py`(M3 训练对生成+split)、`split_inventory.py`(事件覆盖盘点与图片概览)、`evaluation_protocol.py` + `protocol_eval.py`(冻结输入/哈希/严格覆盖/固定预算回归；预算支持局部代表分数与全局排序分数分离)、`golden_exam_eval.py`/`tops_exam_eval.py`(统一协议入口)、`band_hybrid.py`(组内上下文混合入口)、`global_pool_sampler.py`/`global_pool_readback.py`/`global_pair_task.py`(全局精品试点池、读回和跨组直接比较)、`gap_audit.py`(距目标差距审计:随机/结构上限/目标三线并排 + 逐门槛 AUC + 雷同阈值曲线 + 拍摄序位统计,探索方向前先跑一次)。`out/` 覆盖式输出(不入库)。 |
 | [onnx/](onnx/) | DINOv3 模型导出/校验:`export_dinov3_onnx.py` 从 HuggingFace/ModelScope 权重导出双输出(CLS + patch)ONNX;`verify_onnx_parity.py` 校验 PyTorch vs ONNX 一致性(cosine ≥ 0.999)。改动需同步 `PhotoViewer/Core/AI/DinoModelResources.cs`。 |
 | [notebooks/](notebooks/) | `cv_grid_design.ipynb` —— CV 网格设计 PoC(numpy 全量标量验证),已定型归档,不再迭代。 |
 | [train/](train/) | 模型训练脚本:`m4_baseline.py`(基线)、`m5_lora.py`(LoRA,含 cvfuse 分块融合头)、`m6_adapt_sim.py`、`m7_extprobe.py`(外部探针)、`m8_ensemble.py`(系综)、`render_cache.py`；`supervision_data.py`/`supervision_ablation.py`(按来源隔离、均衡曝光、事件留出监督对照)、`cache_visual_features.py`(带身份/哈希的可续跑 DINO+CLIP 特征缓存)、`personal_visual_ranker.py`(训练事件三折、来源均衡的个性化视觉排序器)。`out/` 覆盖式输出(不入库)。 |
-| [docs/](docs/) | 知识与叙事文档(三章按递进认知链划分,见 [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) §0):[HUMAN.md](docs/HUMAN.md)(用户亲笔真源,一切冲突以它为准)、[DOCUMENTATION.md](docs/DOCUMENTATION.md)(文档规范)、[REQUIREMENTS.md](docs/REQUIREMENTS.md)(链第一环:需求锚点真源)、[SUPERVISION.md](docs/SUPERVISION.md)(链第二/三环:习惯+先验登记+标注资产全录)、[KNOWLEDGE.md](docs/KNOWLEDGE.md)(链第四/五环:实测结论+数据特征+负知识墓碑表+可用信息总账)、[analysis-story.md](docs/analysis-story.md)(人读论文式叙事)、[reviews/](docs/reviews/)(阶段审查归档,写入即冻结)。 |
+| [docs/](docs/) | 知识与叙事文档(三章按递进认知链划分,见 [docs/DOCUMENTATION.md](docs/DOCUMENTATION.md) §0):[HUMAN.md](docs/HUMAN.md)(用户亲笔真源,一切冲突以它为准)、[DOCUMENTATION.md](docs/DOCUMENTATION.md)(文档规范)、[METHODOLOGY.md](docs/METHODOLOGY.md)(方法论:三条参照线/先验→假说循环/结论重开条件,探索新方向前必读)、[REQUIREMENTS.md](docs/REQUIREMENTS.md)(链第一环:需求锚点真源)、[SUPERVISION.md](docs/SUPERVISION.md)(链第二/三环:习惯+先验登记+标注资产全录)、[KNOWLEDGE.md](docs/KNOWLEDGE.md)(链第四/五环:实测结论+数据特征+负知识墓碑表+可用信息总账)、[analysis-story.md](docs/analysis-story.md)(人读论文式叙事)、[reviews/](docs/reviews/)(阶段审查归档,写入即冻结)。 |
 | [plans/](plans/) | 三期计划文档(历史档案,已冻结):plan-3-0 宪法 + plan-3-1(M1 详案)+ plan-3-2/3-3/3-4 契约册,彼此用文件名相对链接;**现行需求真源已移交 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)**。一/二期基建历史与 copilot 原始讨论已归还主仓 [../Plans/](../Plans/)(考古专用;已否定方向收编在 plan-3-0 §3 附录),现行基建状态以根 `AGENTS.md` §5.4 为准。 |
 | [data/](data/) | 数据契约文档([data/README.md](data/README.md)):数据集库 schema、与产品 `photos.db` 的对齐关系、`dataset_meta` 版本化约定;入库批次台账([data/BATCHES.md](data/BATCHES.md)):批次源/题材/分组规则/特殊情况,每入库一批更新。数据本体在仓外 `D:\PhotoDB`。 |
 | [EXECUTION-LOG.md](EXECUTION-LOG.md) | 证据链台账(append-only):每次实验的数据/前提/命令/结果/解读/下一步,允许事无巨细,跨会话防遗忘;`probes/out/` 每次覆盖写,靠本台账留档历史结论。 |
@@ -44,9 +44,9 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 
 ## 文档地图
 
-> **阅读纪律（强制，不可省略）**：
-> 1. **每会话开工**（含上下文压缩续接后）：全量重读本文件 → [STATUS.md](STATUS.md) → [docs/HUMAN.md](docs/HUMAN.md) → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)——需求锚点错了则全盘走偏，禁止凭记忆/摘要跳过。
-> 2. **探索新方向前**（新实验设计、新标注发起、新架构/新监督尝试）：必读 [docs/SUPERVISION.md](docs/SUPERVISION.md)（§0.2 先验登记 + 各集"得到了什么/中途启发"）与 [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)（实测结论 + §6 负知识墓碑表）——新方向的启发与已证否的经验都在这里，重复已证死方向 = 浪费。
+> **阅读纪律（强制，不可省略；2026-10-13 改为分级）**：
+> 1. **每会话开工**（含上下文压缩续接后）：本文件 → [STATUS.md](STATUS.md)（**先看顶部"距目标"仪表盘**，那里是唯一可一眼读出"离目标多远"的地方）→ [docs/HUMAN.md](docs/HUMAN.md) 全量重读 → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) §3–§6——需求锚点错了则全盘走偏，禁止凭记忆/摘要跳过。
+> 2. **探索新方向前**（新实验设计、新标注发起、新架构/新监督尝试）：必读 [docs/METHODOLOGY.md](docs/METHODOLOGY.md)（三条参照线、先验→假说循环、结论重开条件）→ [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)（实测结论 + §6 负知识墓碑表，**含重开条件**）→ [docs/SUPERVISION.md](docs/SUPERVISION.md) §0（先验登记）——新方向的启发与已证否的经验都在这里，重复已证死方向 = 浪费；**提出任何方向前先写出"预测 + 最小证伪实验 + 判死条件"三项**（METHODOLOGY §4）。
 
 | 文档 | 一句话职责 | 何时读 | 何时写 |
 |---|---|---|---|
