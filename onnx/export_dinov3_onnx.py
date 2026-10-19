@@ -123,7 +123,7 @@ def main() -> int:
         )
 
     print(f"[export] exporting to {out_path} (opset={args.opset}, dtype={dtype})", flush=True)
-    # external_data=False：把所有权重内嵌到单个 .onnx 文件，Avalonia 作为资源加载只需一份文件。
+    # external_data=False：把所有权重内嵌到单个 .onnx 文件，各平台头以资源打包只需一份文件。
     with torch.no_grad():
         torch.onnx.export(
             wrapper,
