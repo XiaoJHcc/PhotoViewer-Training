@@ -8,7 +8,7 @@
 - **F: 原始库文件夹层级 = 星级层**（已与 XMP rating 交叉验证、**5170 组零不一致**，2026-07-19）：无后缀机型文件夹（`A7C2-*` / `A6700-*`）= 0★（仅 HIF/JPG、XMP 无 rating）；`-OK` = 1-2★（RAW+HIF）；`ARW3*` = 3★+（RAW+HIF，混机型筛选、标准基本一致）。
 - **0★ 回填规则**：F: 批次的 0★ 不写 XMP（Adobe 约定 0=未评）→ 入库后按层级语义回填 `rating=0`（仅填 NULL 行，不覆盖已有 rating）。已执行 2832 行（2026-07-19）。
 - **0★ 语义终裁（2026-07-19 用户确认）**：F:\照片2026-P2 与 D:\PhotoDB **全部已评，0★ 即真 0★**（XMP 0/缺失不再是"未评"）。原留 NULL 的 2732 组（重庆春天 1970 + 旧批 762）已全部回填 0★，**全库无 NULL**。
-- **2025 批补充规则（2026-08-05 用户裁定）**：路径任一层含 `Stack/Pano/HDR/dng/DJI/NEF/Video/@JPG/OUT-JPG/OUTJPG/JPG-/延时` 关键词即剔除（manifest `excludeKeywords`）；只取索尼原 JPG/HIF，**ARW 随扫描进组带 sidecar 星级但不解码**；延时文件夹整体排除；"文件夹没有语义，按实际标星来"——NO 文件夹与 P2 裸文件夹 = 0★ 淘汰件（产品级普查证实 15971 组**组组有星**；初版自写字节扫描曾误判 8300 张 NULL，已订正——**读星级只走产品级 ResolveRating 路径**）。
+- **2025 批补充规则（2026-08-05 用户裁定）**：路径任一层含 `Stack/Pano/HDR/dng/DJI/NEF/Video/@JPG/OUT-JPG/OUTJPG/JPG-/延时` 关键词即剔除（manifest `excludeKeywords`）；只取索尼原 JPG/HIF，**ARW 随扫描进组但不解码**；延时文件夹整体排除；"文件夹没有语义，按实际标星来"——NO 文件夹与 P2 裸文件夹 = 0★ 淘汰件（产品级普查证实 15971 组**组组有星**；初版自写字节扫描曾误判 8300 张 NULL，已订正——**读星级只走产品级 `XmpRatingReader` 路径**）。**该批实星载体是 733 个 sidecar xmp**；训练侧现行口径已不读 sidecar（[../docs/REQUIREMENTS.md](../docs/REQUIREMENTS.md) §2），重跑该批只会经 COALESCE 保留库内既有星级，不会重新提取。
 - **`OUT-JPG*` = 精修导出件（ACR）**：EXIF 可能残缺；**不入库**（精修像素是 OOD，不可作模型输入，plan-3-0 §1 决策 13），仅作精修回溯匹配的来源。**已匹配落标**：命名 = 原片基名+`@JPG(_\d+)?`，按"文件名+事件"匹配（`Training/DatasetBuilder/retouch_match.py --apply`），累计 783 组精修原片 is_retouched=1（2026 批 150 + 2025 批 633）；`retouched.txt` 仅平铺安全子集，跨事件同名（相机计数 rollover）由 SQL 事件域落库——**重跑 DatasetBuilder 勿直接用 retouched.txt，会把这些行冲回 0**。
 - **Stack（曝光包围连拍）/ 延时摄影**：不参与评级、不入库。
 - **macOS AppleDouble 残桩（`._*`）**：非图像，`FingerprintGrouper` 已过滤（2026-07-19 修复）。

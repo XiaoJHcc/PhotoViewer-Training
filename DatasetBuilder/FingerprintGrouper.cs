@@ -2,8 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using MetadataExtractor;
-using MetadataExtractor.Formats.Xmp;
 using PhotoViewer.Core.Database;
 
 namespace DatasetBuilder;
@@ -11,7 +9,7 @@ namespace DatasetBuilder;
 /// <summary>
 /// 裸文件路径版指纹聚合（算法照搬 <c>FolderFeatureIndexer.GroupByFingerprintAsync</c>，但不依赖 ImageFile / PhotoDatabase）。
 /// 同次曝光的 RAW/HEIF/JPG 合为一组、只解码代表文件一次；代表文件按解码代价升序（HEIF→JPG→其他→RAW）。
-/// 额外解析同名 <c>.xmp</c> sidecar 星级（Plan-3-1 §1.1：ARW 的 rating 通常在 sidecar）。
+/// 星级只取文件自身的内嵌 XMP：不读同名 <c>.xmp</c> sidecar、也不在组内跨文件合并。
 /// </summary>
 public static class FingerprintGrouper
 {
@@ -55,9 +53,8 @@ public static class FingerprintGrouper
                 };
                 var fp = PhotoFingerprint.Compute(input);
 
-                var rating = ResolveRating(path, exif.Rating);
                 var relPath = Path.GetRelativePath(entry.Path, path);
-                var file = new SourceFile(path, relPath, entry, exif, rating);
+                var file = new SourceFile(path, relPath, entry, exif, exif.Rating);
 
                 if (!byFp.TryGetValue(fp, out var list))
                 {
@@ -100,40 +97,9 @@ public static class FingerprintGrouper
             ".png" or ".webp" or ".bmp" or ".gif" or ".tiff" or ".tif" => 2,
             _ => 3, // RAW 等
         };
-
-    /// <summary>
-    /// 星级 = max(嵌入 XMP 星级, 同名 sidecar 星级)。sidecar 探测 "name.xmp" 与 "name.ext.xmp" 两种约定。
-    /// </summary>
-    private static int ResolveRating(string path, int embedded)
-    {
-        int rating = embedded;
-        foreach (var sidecar in new[] { Path.ChangeExtension(path, ".xmp"), path + ".xmp" })
-        {
-            if (!File.Exists(sidecar)) continue;
-            var r = ReadXmpRating(sidecar);
-            if (r > rating) rating = r;
-        }
-        return rating;
-    }
-
-    /// <summary>从 .xmp sidecar 文件读 xmp:Rating；失败或缺失返回 0。</summary>
-    private static int ReadXmpRating(string sidecarPath)
-    {
-        try
-        {
-            using var stream = File.OpenRead(sidecarPath);
-            var dirs = ImageMetadataReader.ReadMetadata(stream);
-            var xmp = dirs.OfType<XmpDirectory>().FirstOrDefault();
-            var meta = xmp?.XmpMeta;
-            if (meta == null) return 0;
-            var s = meta.GetPropertyString("http://ns.adobe.com/xap/1.0/", "xmp:Rating");
-            return s != null && int.TryParse(s, out var r) ? r : 0;
-        }
-        catch { return 0; }
-    }
 }
 
-/// <summary>一个待入库文件（含来源标签与 EXIF）。</summary>
+/// <summary>一个待入库文件（含来源标签与 EXIF）。<c>Rating</c> 为该文件自身内嵌 XMP 的评级，0 = 无可用标签。</summary>
 public sealed record SourceFile(string Path, string RelPath, FolderEntry Folder, PhotoExif Exif, int Rating);
 
 /// <summary>一组同指纹的文件。</summary>
@@ -158,8 +124,8 @@ public sealed class FpGroup
     /// <summary>代表文件：喂给 DINO/CV 的那张（解码代价最低）。</summary>
     public SourceFile Representative => Files[0];
 
-    /// <summary>组内星级 = 各文件解析星级的最大值（0 表示未评）。</summary>
-    public int Rating => Files.Max(f => f.Rating);
+    /// <summary>组内星级 = 实际选用文件（代表件）自身内嵌 XMP 的评级；0 表示无可用标签，不跨文件取 max。</summary>
+    public int Rating => Representative.Rating;
 
     /// <summary>组内出现的扩展名集合（去点、小写、去重、排序，以 '|' 连接），如 "arw|hif"。</summary>
     public string Formats => string.Join('|',

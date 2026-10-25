@@ -64,7 +64,7 @@
 - **目的**：人工选片本身（每次外拍约 5 小时的成本即源于此流程）；训练侧把它当偏好监督反推。
 - **协议（习惯）**：机制真源见 [HUMAN.md](HUMAN.md)（任务定义、各档位语义、晋级比例、可比性边界）；执行层落地规则见 §0.1。
 - **规模与构成**：25302 指纹组（同次曝光 RAW/HIF/JPG 合一）/ 24 事件 / 310 段（10min gap）；分布 0★13606 / 1★5189 / 2★3238 / 3★1866 / 4★797 / 5★606（≥3★ 12.9%）；逐事件明细与批次特殊情况 → [../data/BATCHES.md](../data/BATCHES.md)。
-- **位置**：XMP rating（内嵌元素/属性双形态 + 同名 sidecar 两约定取 max，组内取 max）→ `photos.rating`；全库无 NULL。
+- **位置**：实际选用文件（指纹组代表件，HIF > JPG > RAW）**自身内嵌** XMP rating → `photos.rating`（口径 = 产品 `XmpRatingReader`，裁定 → [REQUIREMENTS.md](REQUIREMENTS.md) §2）；不读 sidecar 与伴侣文件。冲突/缺失/无效/Rejected/0★ 不入库，0★ 由批次语义回填（→ [../data/BATCHES.md](../data/BATCHES.md)）；现有库无 NULL。
 - **状态**：全量在库。派生监督 = 段内滑窗 window 对 + ≥3★ 事件内 global 对（`audit/m3_pair_gen.py`；v2 现行 train = window 38982 / global 33412）。
 - **得到了什么**：段内相对信号强、跨场绝对信息弱而真实；团内冠军位约三成不稳；老 2★/3★ 在新尺下不可分，硬边界只有 0→1 与 4→5；window 监督大头是"同团双落败者"；晋级比例实测与 HUMAN 标称逐层互证——实测性质与数字 → [KNOWLEDGE.md](KNOWLEDGE.md) §1。
 - **中途启发**：两段机制、清洁度绑定、整数舍入噪声裁定等 → §0.2。

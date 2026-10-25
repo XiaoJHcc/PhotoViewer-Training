@@ -445,6 +445,7 @@ internal static class Program
             Aperture = exif.Aperture,
             ShutterSpeed = exif.ShutterSpeed,
             CropFactor = cropFactor,
+            // 只有有效 Rated 1–5 才进入训练 Rating 快照；0★、缺失、Invalid、Conflict、Rejected 一律不写。
             Rating = rating > 0 ? rating : null,
         };
     }

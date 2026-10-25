@@ -1,6 +1,6 @@
 # STATUS — 自动选片训练当前进度
 
-> 最近更新：2026-10-13（距目标差距审计）。本文只记**当前状态**，每会话末重写（不追加）。**数字级事实只留指针**——**唯一例外：下方"距目标"仪表盘为可读性保留数字**（[DOCUMENTATION.md](docs/DOCUMENTATION.md) §5）。
+> 最近更新：2026-10-25（Rating 提取契约收口）。本文只记**当前状态**，每会话末重写（不追加）。**数字级事实只留指针**——**唯一例外：下方"距目标"仪表盘为可读性保留数字**（[DOCUMENTATION.md](docs/DOCUMENTATION.md) §5）。
 > 认知链：上游真源 → [docs/HUMAN.md](docs/HUMAN.md)；需求与判据 → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md)（§3/§4 已按 10-13 裁定重写）；习惯与先验 → [docs/SUPERVISION.md](docs/SUPERVISION.md) §0；标注资产 → SUPERVISION §1 起；实测结论与负知识 → [docs/KNOWLEDGE.md](docs/KNOWLEDGE.md)；方法论 → [docs/METHODOLOGY.md](docs/METHODOLOGY.md)；人读叙事 → [docs/analysis-story.md](docs/analysis-story.md)；证据链台账 → [EXECUTION-LOG.md](EXECUTION-LOG.md)。
 
 ## 距目标（第一期：0→3★ 的减量与不漏）
@@ -30,7 +30,8 @@
 - **阶段**：v2 开发留出时代。train 14 / val 4 / test 6 事件（`data/split-v2-20260924.json`）；**v2 test 已被开发流程接触，不是独立终考**。
 - **数据集时间窗已定型**（2024-01-22 ~ 2026-05-10，无后续事件）→ 终考只能落在**未来新拍摄**上（KNOWLEDGE §4）。
 - **图像输入已修复**（2026-09-26）：解码版本 `display-plane-v3`（模型 id `dinov3_vits16_f32_518_v2`），旧 `render518` 缓存禁止混用。**注**：该修复对全局指标的作用在噪声带内（KNOWLEDGE §4），但正确性无争议。
-- **文档体系**：2026-10-13 完成"距目标差距审计 + 方法论草案"（[METHODOLOGY.md](docs/METHODOLOGY.md) 新建、[reviews/2026-10-13-gap-audit.md](docs/reviews/2026-10-13-gap-audit.md) 归档），并按用户裁定重写 REQUIREMENTS §3/§4（四项裁定全部落地）。
+- **Rating 提取契约已收口**（2026-10-25 用户裁定）：DatasetBuilder 只读实际选用文件自身内嵌的 XMP（复用产品 `XmpRatingReader.ReadDirectories`），不读同名 sidecar、不读指纹组伴侣、不跨来源取 max；内嵌冲突/`Invalid`/`Missing`/`Rejected`/0★ 都不写 `photos.rating`。`Training.sln` 构建 0 错 0 警；`--scan-only` 已验证 HIF 实读、sidecar 不参与、伴侣不取 max、内部冲突与一致多 XMP 四类口径。**已知约束**：2025 批 15884 组的实星载体是 733 个 sidecar（源文件内嵌无星），重跑该批不会重新提取星级（`COALESCE` 保留库内既有值）；今后若沿用 sidecar 标注，需先回写内嵌 XMP 再入库（BATCHES 已登记）。
+- **文档体系**：2026-10-13 完成"距目标差距审计 + 方法论草案"（[METHODOLOGY.md](docs/METHODOLOGY.md) 新建、[reviews/2026-10-13-gap-audit.md](docs/reviews/2026-10-13-gap-audit.md) 归档），并按用户裁定重写 REQUIREMENTS §3/§4（四项裁定全部落地）；2026-10-25 将 Rating 契约同步写入 REQUIREMENTS §2、AGENTS「对产品的契约」、SUPERVISION §1、data/README 与 BATCHES。
 
 ## 下一步与停止条件
 
@@ -50,9 +51,11 @@
 ## 已冻结参数与提交状态
 
 - 划分：v2（上）；输入版本：`display-plane-v3`；横评对：`abs_pairs_v2_sessions_20260924`。
-- 相邻两次提交：`6276c6b`（适配主仓 P0-M4 像素契约）、`8002d4d`（09-29 文档体系二次重构）；本轮改动见下。
-- **本次（2026-10-13，10-14 复核修订）改动文件**：新增 `audit/gap_audit.py`、`docs/METHODOLOGY.md`、`docs/reviews/2026-10-13-gap-audit.md`；更新 `docs/KNOWLEDGE.md`（§1/§3/§4/§5/§6/§7/§8）、`docs/SUPERVISION.md`（§0.2 #28–#31）、`docs/REQUIREMENTS.md`（§3/§4 重写 + §6 改为裁定索引）、`docs/analysis-story.md`（§0 / §17 收窄 / §18 按"审查→发现→修正"重写并预留 18.2–18.4）、`STATUS.md`、`EXECUTION-LOG.md`、`AGENTS.md`、`docs/DOCUMENTATION.md`。**未提交**。
+- 最近提交：`6276c6b`（适配主仓 P0-M4 像素契约）、`8002d4d`（09-29 文档体系二次重构）、`5396e55`（人工修订 HUMAN 宗旨）、`16fc681`（10-13 距目标差距审计）、`8cc0c9a`（10-19 DatasetBuilder 去 Avalonia），以及本轮 10-25 Rating 提取契约收口提交。
+- **10-13 审计改动**（已提交 `16fc681`）：新增 `audit/gap_audit.py`、`docs/METHODOLOGY.md`、`docs/reviews/2026-10-13-gap-audit.md`；更新 `docs/KNOWLEDGE.md`（§1/§3/§4/§5/§6/§7/§8）、`docs/SUPERVISION.md`（§0.2 #28–#31）、`docs/REQUIREMENTS.md`（§3/§4 重写 + §6 改为裁定索引）、`docs/analysis-story.md`（§0 / §17 收窄 / §18 按"审查→发现→修正"重写）、`STATUS.md`、`EXECUTION-LOG.md`、`AGENTS.md`、`docs/DOCUMENTATION.md`。
 - **10-14 复核修订**：逐项核对文档数字与 `audit/out/gap_audit/` 产物，修正 8 处口径/数字错误（AP 表精度格、随机基线、R80 区间、"非团首"占比口径、"3 倍"塌陷的过度概括、6/24 笔误、≥3★ 占比区间自相矛盾、`§1.5` 末张结论与裁定相冲）；裁定正文归位（REQUIREMENTS §6 由复述改索引，登记留 SUPERVISION §0.2，方法论含义留 METHODOLOGY）。
+- **10-19 改动**（已提交 `8cc0c9a`）：DatasetBuilder 去 Avalonia——删 UI 平台初始化与 dispatcher pump，解码与 518 缩放全走 Core `SkiaImageCodec`，主线程直接等待管线；像素口径未变。
+- **10-25 改动**（本轮提交，详见 [EXECUTION-LOG.md](EXECUTION-LOG.md) 同日条目）：`PhotoDecode`/`FingerprintGrouper` 星级读取收口为内嵌 XMP 单源（删 `ResolveRating`/`ReadXmpRating` 的 sidecar 与组内取 max 逻辑）；契约同步 REQUIREMENTS §2、AGENTS、SUPERVISION §1、data/README、BATCHES、EXECUTION-LOG；`audit/abs_set_sampler.py` 与 `audit/golden_star_readback.py` 的过期表述改为"标注读回 vs 入库快照"分工（逻辑未改）。
 
 ## 新会话起点
 

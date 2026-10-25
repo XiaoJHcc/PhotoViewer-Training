@@ -40,6 +40,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 - **单向依赖,产品是唯一真源**:`PhotoViewer/Core`(DINOv3 推理、CV 网格提取、EXIF 读取、增强算法等)是训练侧提取逻辑的唯一真源;`DatasetBuilder` 通过 `ProjectReference` 直接复用,不重新实现、不分叉。
 - **训练消费产品,不反向影响产品行为**:训练侧的数据集 schema、探针结论、模型训练不得要求产品代码为训练目的改变用户可见行为;产品功能(如控制栏增强 toggle)独立立项,训练侧只是复用其确定性算法。
 - **Python 只吃数据集库 schema**:`probes/` 与产品之间没有代码耦合,仅通过 SQLite 数据集库的表结构契约(见 [data/README.md](data/README.md))交互——产品与提取算法可以自由演进,只要 schema 契约(表名/列名/`model_id`/`cv_grid_spec` 版本化规则)不破坏,探针脚本不需要跟着改。
+- **训练星级只读实际选用文件的内嵌 XMP**(2026-10-25 用户裁定,语义真源 → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) §2):`PhotoDecode` 直接复用产品 `XmpRatingReader.ReadDirectories`;不读同名 sidecar、不读指纹组内伴侣文件、不跨来源取 max。多份内嵌 XMP 冲突、缺失、`Invalid`、`Rejected` 与 0★ 都不写入 `photos.rating`,不任选一个值。
 - **数据在仓外**:训练用原始照片与生成的数据集库位于 `D:\PhotoDB`(仓外,不受仓库大小/清理影响,便携)。仓内只有代码、脚本、计划与文档。
 
 ## 文档地图

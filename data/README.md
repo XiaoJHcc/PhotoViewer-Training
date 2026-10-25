@@ -28,7 +28,7 @@
 |---|---|---|
 | `fingerprint` | TEXT PK | 同次曝光的 RAW/HIF/JPG 共享同一指纹 |
 | `filename_noext` / `capture_time` / `capture_subsec` | TEXT | 指纹身份三要素 |
-| `rating` | INTEGER | 星级(COALESCE 写入,不会被空值覆盖抹掉) |
+| `rating` | INTEGER | 星级；只写实际选用文件（指纹组代表件）自身内嵌 XMP 的 `Rated` 1–5（口径 = 产品 `XmpRatingReader`），伴侣文件与 sidecar 不读、不取 max；0★、缺失、`Invalid`、`Conflict`、`Rejected` 一律不写。COALESCE 写入,不会被空值覆盖抹掉；0★ 由批次语义回填 |
 | `focal_length` / `aperture` / `shutter_speed` / `crop_factor` | REAL | EXIF 快照,原始值(等效焦距/光圈不入库,训练脚本自行换算) |
 | `cv_grid` | BLOB | CV 网格 7 标量(含 `block_contrast`),编码方式见 `CvGridResult.Encode()` |
 | `cv_grid_spec` | TEXT | CV 算法版本串,与当前 `CvGridResult.CurrentVersion` 不匹配即视为该项缺失需要重算 |
