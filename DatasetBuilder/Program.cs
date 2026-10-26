@@ -7,10 +7,6 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using Avalonia;
-using Avalonia.Media.Imaging;
-using Avalonia.Threading;
-using Avalonia.Win32;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
 using MetadataExtractor.Formats.Exif.Makernotes;
@@ -63,7 +59,7 @@ internal static class Program
             return 1;
         }
 
-        // 分布探查：只扫描 + 指纹聚合 + 读 EXIF，不解码、不建库、不需要 Avalonia/DirectML。
+        // 分布探查：只扫描 + 指纹聚合 + 读 EXIF，不解码、不建库、不需要 DirectML。
         if (scanOnly)
         {
             ScanReport.Print(FingerprintGrouper.Scan(manifest.Folders, manifest.ExcludeKeywords));
@@ -76,7 +72,7 @@ internal static class Program
             return RunDumpRender(manifest, dumpRender, concurrencyOverride);
 
         // 加速度计/姿态导出（水平度信号基建）：只读 EXIF（机型 + Sony 0x940F），
-        // 不解码位图、不建库、无 Avalonia/dispatcher。三轴恒导出，俯仰/横滚仅已校准机型。
+        // 不解码位图、不建库。三轴恒导出，俯仰/横滚仅已校准机型。
         if (dumpAccel != null)
             return RunDumpAccel(manifest, dumpAccel, concurrencyOverride);
 
@@ -92,49 +88,20 @@ internal static class Program
             return 1;
         }
 
-        // Avalonia 平台初始化（RenderTargetBitmap / WriteableBitmap 需要）。软件渲染（Skia CPU）避开 GPU 合成器。
-        AppBuilder.Configure<Application>()
-            .UsePlatformDetect()
-            .With(new Win32PlatformOptions { RenderingMode = new[] { Win32RenderingMode.Software } })
-            .SetupWithoutStarting();
         DinoFeatureExtractor.ConfigureSession(o => o.AppendExecutionProvider_DML());
 
-        // 提取在后台线程跑，主线程 pump UI dispatcher：DINO 预处理的 RenderTargetBitmap 会向 UI 线程做
-        // 渲染往返，必须有活跃 dispatcher 服务它才不死锁（等同 App 内有运行中的 dispatcher 循环）。
-        int rc = 0;
-        var cts = new CancellationTokenSource();
-        _ = Task.Run(async () =>
-        {
-            try { rc = await RunPipelineAsync(manifest, concurrencyOverride, modelFile, modelIdOverride, noPatch); }
-            catch (Exception ex) { Console.WriteLine($"[ERROR] {ex}"); rc = 3; }
-            finally { cts.Cancel(); }
-        });
-        try { Dispatcher.UIThread.MainLoop(cts.Token); }
-        catch (OperationCanceledException) { }
-        return rc;
+        // 解码与 DINO 预处理全部走 Core 的 SkiaImageCodec，不依赖 UI 线程，主线程直接等待管线。
+        try { return RunPipelineAsync(manifest, concurrencyOverride, modelFile, modelIdOverride, noPatch).GetAwaiter().GetResult(); }
+        catch (Exception ex) { Console.WriteLine($"[ERROR] {ex}"); return 3; }
     }
 
     /// <summary>
-    /// --dump-render 入口：初始化 Avalonia（软件渲染）+ pump dispatcher（RenderTargetBitmap 渲染
-    /// 会向 UI 线程做往返，同主管线），后台线程跑 <see cref="DumpRenderAsync"/>。无 ONNX 会话，不悬挂。
+    /// --dump-render 入口：后台无 UI 依赖，主线程直接跑 <see cref="DumpRenderAsync"/>。无 ONNX 会话，不悬挂。
     /// </summary>
     private static int RunDumpRender(IngestManifest manifest, string dir, int? concurrencyOverride)
     {
-        AppBuilder.Configure<Application>()
-            .UsePlatformDetect()
-            .With(new Win32PlatformOptions { RenderingMode = new[] { Win32RenderingMode.Software } })
-            .SetupWithoutStarting();
-        int rc = 0;
-        var cts = new CancellationTokenSource();
-        _ = Task.Run(async () =>
-        {
-            try { rc = await DumpRenderAsync(manifest, dir, concurrencyOverride); }
-            catch (Exception ex) { Console.WriteLine($"[ERROR] {ex}"); rc = 3; }
-            finally { cts.Cancel(); }
-        });
-        try { Dispatcher.UIThread.MainLoop(cts.Token); }
-        catch (OperationCanceledException) { }
-        return rc;
+        try { return DumpRenderAsync(manifest, dir, concurrencyOverride).GetAwaiter().GetResult(); }
+        catch (Exception ex) { Console.WriteLine($"[ERROR] {ex}"); return 3; }
     }
 
     /// <summary>
@@ -204,7 +171,7 @@ internal static class Program
         return fail == 0 ? 0 : 2;
     }
 
-    /// <summary>--dump-accel 入口：纯 EXIF 读取（无位图解码/无 Avalonia/无 ONNX），主线程直接跑，不悬挂。</summary>
+    /// <summary>--dump-accel 入口：纯 EXIF 读取（无位图解码/无 ONNX），主线程直接跑，不悬挂。</summary>
     private static int RunDumpAccel(IngestManifest manifest, string csvPath, int? concurrencyOverride)
     {
         Console.WriteLine("扫描 + 指纹聚合中…");
@@ -484,6 +451,7 @@ internal static class Program
             Aperture = exif.Aperture,
             ShutterSpeed = exif.ShutterSpeed,
             CropFactor = cropFactor,
+            // 只有有效 Rated 1–5 才进入训练 Rating 快照；0★、缺失、Invalid、Conflict、Rejected 一律不写。
             Rating = rating > 0 ? rating : null,
         };
     }

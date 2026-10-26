@@ -2,7 +2,8 @@
 golden_star_readback.py — 标星读回：组内最高星 = 用户选择 → 生成答卷 + 判决报告
 
 读取 D:/PhotoDB/dataset/golden_star/ 中用户标星后的照片（内嵌 XMP 与 .xmp sidecar 两通路，
-取 max，与入库 ResolveRating 同哲学）：
+取 max——这是**标注读回**，要接住用户写到任一载体的评分；数据集入库的 rating 快照只认文件
+自身内嵌 XMP，见 docs/REQUIREMENTS.md §2）：
   - 组内最高星 >0 且唯一 → 胜者 = 该匿名位；
   - 最高星 >0 且多张并列 → tie（并列位记录）；
   - 全组 0 星 → tie0（真无差别 / 全不合格 / 未标——报告里与显式 tie 合并计但单列计数）。

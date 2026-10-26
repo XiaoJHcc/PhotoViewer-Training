@@ -11,7 +11,7 @@ abs_set_sampler.py — M1 §1.5 绝对性探针（重标集方案，替代 108 �
        摊匀抽取；每张只用一次。
     2. 复制到 D:/PhotoDB/dataset/abs_set/：中性顺序名 P0001..P0200，保留原扩展名
        （formats 含 jpg 的组复制 .JPG，其余复制代表 .HIF；不复制 ARW、不复制 .xmp
-       sidecar——sidecar 会带星级，FingerprintGrouper.ResolveRating 会读它）。
+       sidecar——训练侧星级只认文件自身内嵌 XMP，副本目录也不混入非图像文件）。
        编号前先整体 shuffle，编号不泄露事件/星级分组。
     3. 抹星级（关键）：HIF/JPG 内嵌 XMP 的 xmp:Rating 有元素形式 <xmp:Rating>4</xmp:Rating>
        与属性形式 xmp:Rating="4"（两种实测均存在）。对副本做等长字节替换：

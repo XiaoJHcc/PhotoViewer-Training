@@ -5,6 +5,7 @@ using LibHeifSharp;
 using MetadataExtractor;
 using MetadataExtractor.Formats.Exif;
 using MetadataExtractor.Formats.Xmp;
+using PhotoViewer.Core;
 using PhotoViewer.Core.Image;
 
 namespace DatasetBuilder;
@@ -34,7 +35,7 @@ public static class PhotoDecode
     public static bool CanDecode(string path) =>
         DecodableExtensions.Contains(Path.GetExtension(path).ToLowerInvariant());
 
-    /// <summary>读取一个文件的 EXIF/XMP：拍摄时间、SubSec、焦距/光圈/快门/等效焦距、星级。失败返回全空。</summary>
+    /// <summary>读取一个文件的 EXIF/XMP：拍摄时间、SubSec、焦距/光圈/快门/等效焦距、内嵌星级（不读 sidecar）。失败返回全空。</summary>
     /// <param name="path">文件绝对路径。</param>
     /// <returns>EXIF 快照。</returns>
     public static PhotoExif ReadExif(string path)
@@ -44,7 +45,6 @@ public static class PhotoDecode
             using var stream = File.OpenRead(path);
             var dirs = ImageMetadataReader.ReadMetadata(stream);
             var sub = FindShootingExifSubIfd(dirs);
-            var xmp = dirs.OfType<XmpDirectory>().FirstOrDefault();
 
             DateTime? captureTime = null;
             if (sub != null && sub.TryGetDateTime(ExifDirectoryBase.TagDateTimeOriginal, out var dt))
@@ -60,16 +60,10 @@ public static class PhotoDecode
             // 对齐产品 ExifLoader/PhotoStatsService：先 int32 后 rational。
             double? equivFocal = GetInt32OrRational(sub, ExifDirectoryBase.Tag35MMFilmEquivFocalLength);
 
-            int rating = 0;
-            if (xmp?.XmpMeta != null)
-            {
-                try
-                {
-                    var s = xmp.XmpMeta.GetPropertyString("http://ns.adobe.com/xap/1.0/", "xmp:Rating");
-                    if (s != null) int.TryParse(s, out rating);
-                }
-                catch { }
-            }
+            // 训练 Rating 只认该文件自身的内嵌 XMP，语义直接用产品 XmpRatingReader：
+            // 多份内嵌 XMP 取值不同判 Conflict；Missing / Invalid / Conflict / Rejected 与 0★ 都不是
+            // 可用训练标签，统一记 0（不任选一个值）。
+            int rating = XmpRatingReader.ReadDirectories(dirs.OfType<XmpDirectory>()).ValueOrZero;
 
             return new PhotoExif(captureTime, subSec, focal, aperture, shutter, equivFocal, rating);
         }
@@ -182,6 +176,8 @@ public static class PhotoDecode
 }
 
 /// <summary>一个文件的 EXIF 快照（裸读）。</summary>
+/// <remarks><c>Rating</c> 只取该文件自身内嵌 XMP 的 Rated 值；0 表示无可用训练标签
+/// （0★、缺失、Invalid、Conflict、Rejected），入库时按 &gt;0 过滤。</remarks>
 public readonly record struct PhotoExif(
     DateTime? CaptureTime, string? SubSec,
     double? FocalLength, double? Aperture, double? ShutterSpeed, double? EquivFocalLength,

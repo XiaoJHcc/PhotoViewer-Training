@@ -49,7 +49,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 - **姿态导出**:`dotnet run --project DatasetBuilder -- --manifest <manifest.json> [附加文件夹...] --dump-accel <csv>`(逐指纹组读机型 + Sony 0x940F → CSV;三轴恒有,俯仰/横滚仅已校准机型 ILCE-7CM2/ILCE-6700;ILCE-6100 的 0x940F 为全零块=无数据;纯 EXIF 读取不建库、不悬挂)。全库产物 `D:/PhotoDB/dataset/accel_export.csv`。
 - **探针**:Python 侧用主库仓根的 `../Tools/.venv`(独立虚拟环境,首轮探针即用它;新建则 `pip install -r probes/requirements.txt`),例如 `../Tools/.venv/Scripts/python.exe probes/feature_probe.py --db D:/PhotoDB/dataset/photos_dataset.db`(从本仓根执行)。
 - **训练(GPU)**:`../Tools/.venv-gpu/Scripts/python.exe`(torch cu128,4080),须带 `PYTHONUTF8=1`;**训练在飞时禁改 `train/m5_lora.py`**(spawn worker 重载崩毁过);固定 epoch 预算不早停,每轮全库打分留 `scores_ep*.csv`(系综/考卷原料)。
-- **渲染缓存正路**:`dotnet run --project DatasetBuilder -- <文件夹或 --manifest> --dump-render D:/PhotoDB/dataset/render518-display-plane-v3`(与 DINO 预处理同一解码+缩放路径;Python 复刻已证伪 cos 0.90,勿用)。DatasetBuilder 主流程与 dump-render 跑完可能悬挂,GATE 打印后 kill 即可。
+- **渲染缓存正路**:`dotnet run --project DatasetBuilder -- <文件夹或 --manifest> --dump-render D:/PhotoDB/dataset/render518-display-plane-v3`(与 DINO 预处理同一解码+缩放路径;Python 复刻已证伪 cos 0.90,勿用)。DatasetBuilder 主流程与 dump-render 跑完可能悬挂,GATE 打印后 kill 即可。DatasetBuilder 已不依赖 Avalonia(2026-10-19):解码与 518 缩放全走 Core `SkiaImageCodec`,主线程直接等待管线,不再初始化 UI 平台或 pump dispatcher;像素口径未变(自 `6276c6b` 起即为 Skia 路径),在 Windows 上首跑可用小文件夹 `--dump-render` 与既有缓存逐文件比对哈希确认。
 - **权重缓存**:DINOv3 走本机 ModelScope 缓存(`~/.cache/modelscope/hub/models/facebook/dinov3-vit*16-pretrain-lvd1689m`,直接当 `--model-id`;HF 门控 repo 401 绕行);CLIP-L/14 同缓存(`AI-ModelScope/clip-vit-large-patch14`);LAION 美学头 `D:/PhotoDB/dataset/models/sac_logos_ava1-l14-linearMSE.pth`。
 - **DB 访问**:只读用 `mode=ro` URI;`photos.source_rel_path` + `event_label` → manifest 根目录解析源文件(旧批空事件名映射 `2024-2-12 雾天风光`,见 [data/BATCHES.md](data/BATCHES.md))。
 
@@ -58,6 +58,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 - **单向依赖,产品是唯一真源**:`PhotoViewer/Core`(DINOv3 推理、CV 网格提取、EXIF 读取、增强算法等)是训练侧提取逻辑的唯一真源;`DatasetBuilder` 通过 `ProjectReference` 直接复用,不重新实现、不分叉。
 - **训练消费产品,不反向影响产品行为**:训练侧的数据集 schema、探针结论、模型训练不得要求产品代码为训练目的改变用户可见行为;产品功能(如控制栏增强 toggle)独立立项,训练侧只是复用其确定性算法。
 - **Python 只吃数据集库 schema**:`probes/` 与产品之间没有代码耦合,仅通过 SQLite 数据集库的表结构契约(见 [data/README.md](data/README.md))交互——产品与提取算法可以自由演进,只要 schema 契约(表名/列名/`model_id`/`cv_grid_spec` 版本化规则)不破坏,探针脚本不需要跟着改。
+- **训练星级只读实际选用文件的内嵌 XMP**(2026-10-25 用户裁定,语义真源 → [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) §2):`PhotoDecode` 直接复用产品 `XmpRatingReader.ReadDirectories`;不读同名 sidecar、不读指纹组内伴侣文件、不跨来源取 max。多份内嵌 XMP 冲突、缺失、`Invalid`、`Rejected` 与 0★ 都不写入 `photos.rating`,不任选一个值。
 - **数据在仓外**:训练用原始照片与生成的数据集库位于 `D:\PhotoDB`(仓外,不受仓库大小/清理影响,便携)。仓内只有代码、脚本、计划与文档。
 
 ## 文档地图

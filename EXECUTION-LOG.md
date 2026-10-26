@@ -782,6 +782,22 @@
 - **下一步（已按裁定更新）**：① 选片单位回到时间窗 + 近重抑制 + 名次和直排（零训练成本，已验证 AP 0.153→0.204、AP 闭合 −0.015→+0.046）；② 主指标改报 **AP + AP 缺口闭合率**（辅助指标必带精度/纯度）；③ 第一期模型主线 = 0→1 技术闸门（AUC 0.57，减量最大、信号最全）；④ `cluster_size`/`is_cluster_top` 降级为诊断工具并按下游口径重建。**不再**以追 80%@12.5% 为验收路径，**不再**为验收而发起标注。
 - **本次改动文件**：新增 `audit/gap_audit.py`、`docs/METHODOLOGY.md`、`docs/reviews/2026-10-13-gap-audit.md`；更新 `docs/KNOWLEDGE.md`、`docs/SUPERVISION.md`、`docs/REQUIREMENTS.md`、`docs/DOCUMENTATION.md`、`STATUS.md`、`AGENTS.md`、`EXECUTION-LOG.md`。**未提交**（待用户过目）。
 
+### 2026-10-25 · 训练 Rating 提取契约收口：只认实际选用文件自身内嵌 XMP
+
+- **起因（用户裁定）**：训练选片通常只用 HIF、不取 RAW；星级只消费实际选用文件自身内嵌的 Rating，不读伴侣文件与 sidecar、不跨来源取 max；同一文件多份内嵌 XMP 的 Rating 冲突、`Invalid`/不可读、`Rejected`、`Missing` 与 0★ 都不写训练 Rating 快照，不任选一个值。裁定已入 [docs/REQUIREMENTS.md](docs/REQUIREMENTS.md) §2。
+- **改动**：`PhotoDecode.ReadExif` 的星级读取由 `FirstOrDefault` + `GetPropertyString`（只取首个内嵌 XMP）改为产品 `XmpRatingReader.ReadDirectories`（枚举全部内嵌 XMP 目录；Conflict/Invalid/Missing/Rejected → 0），不在训练侧分叉解析；`FingerprintGrouper` 删除 `ResolveRating`/`ReadXmpRating`（内嵌 + 同名 sidecar 两约定取 max），`SourceFile.Rating` 只存该文件自身内嵌值，`FpGroup.Rating` 改为代表件值（不再组内取 max）；`BuildExifSnapshot` 仍按 `>0` 才写 `photos.rating`。契约同步：REQUIREMENTS §2 / AGENTS「对产品的契约」/ SUPERVISION §1「位置」/ data/README `rating` 列 / BATCHES 2025 批说明；`audit/abs_set_sampler.py` 与 `audit/golden_star_readback.py` 中指向 `ResolveRating` 的过期表述改为「标注读回 vs 入库快照」分工（读回逻辑本身未改）。
+- **命令**：`dotnet build Training.sln` → 0 warning / 0 error。
+- **验证（`--scan-only`，每个目录 1 个指纹组；/tmp 临时夹具）**：
+  - `/tmp/pv-final-probe/with-sidecar`（HIF 内嵌 3、ARW 内嵌 3、sidecar 3）→ **3★**（真实 HIF 可正常扫描读取）。
+  - `/tmp/pv-rating-sidecar`（HIF 内嵌 3、sidecar 5）→ **3★**（sidecar 不参与，无 max）。
+  - `/tmp/pv-rating-companion`（代表 HIF 内嵌 0、伴侣 ARW 内嵌 3）→ **0★**（不读伴侣、组内不取 max）。
+  - `/tmp/pv-rating-invalid`（HIF 内嵌 9，超范围）→ **0★**（Invalid 不任选）。
+  - 合成 JPEG 双 APP1 XMP：`/tmp/pv-rating-conflict`（3 与 5 冲突）→ **0★**；`/tmp/pv-rating-same`（4 与 4 一致）→ **4★**。
+- **解读**：训练 rating 快照与产品读取语义单一真源，冲突/无效不再有"取较大值"的隐性选择；HIF 单文件即可稳定读出实星。
+- **影响/注意**：2025 批 15884 组的实星载体是 733 个 sidecar（源文件内嵌无星）——重跑该批不会重新提取星级，只有 COALESCE 保留库内既有值；今后若沿用 sidecar 标注，需先回写内嵌 XMP 再入库。
+- **下一步**：本次改动未提交，待用户过目。
+
+
 ### 2026-09-25 · 补记：v2 三探针（context heads / 来源冲突 / 局部监督）——原缺失，2026-10-13 按产物回填
 
 > 说明：本三条在 09-25~09-26 执行，但未写入台账（仅留 `train/out/`、`audit/out/` 产物）。2026-10-13 审计发现该缺口，按产物补记，标注为补记以免与当日新结论混淆。
