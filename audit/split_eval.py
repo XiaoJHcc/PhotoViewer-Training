@@ -5,33 +5,28 @@ import argparse
 from collections import defaultdict
 from pathlib import Path
 
-from evaluation_protocol import (abs_metrics, budget_metrics, digest, load_scores,
+from evaluation_protocol import (RATING_VERSION, abs_metrics, budget_metrics, digest, load_scores,
                                  local_metrics, mean_or_none, pair_metrics, read_rows,
-                                 require_coverage, write_json)
+                                 ranking_metrics, require_coverage, write_json)
 from protocol_eval import joined_labels
 
 
 def summarize_budget(rows: list[dict]) -> dict:
-    """按事件等权汇总预算内旧星好片召回，并给出随机选代表的解析期望。"""
+    """汇总完整事件预算下精度/召回、基准率与上限，同时保留合并分母口径。"""
     result = {}
     for fraction in sorted({row["budget_fraction"] for row in rows}):
         subset = [row for row in rows if row["budget_fraction"] == fraction]
         result[str(fraction)] = {
             "events": len(subset),
             "actual_kept_fraction_macro": mean_or_none(row["kept"] / row["photos"] for row in subset),
-            **{f"{kind}_recall_macro": mean_or_none(
-                row[f"positive_{kind}_hits"] / row[f"positive_{plural}"]
-                for row in subset if row[f"positive_{plural}"])
-               for kind, plural in (("photo", "photos"), ("group", "groups"), ("singleton", "singletons"))},
-            "random_group_recall_macro": mean_or_none(
-                min(row["budget"], row["candidate_groups"]) / row["candidate_groups"]
-                for row in subset if row["positive_groups"]),
-            "good_representative_group_recall_macro": mean_or_none(
-                row["positive_photo_hits"] / row["positive_groups"]
-                for row in subset if row["positive_groups"]),
-            "one_per_group_photo_recall_ceiling_macro": mean_or_none(
-                min(row["budget"], row["positive_groups"]) / row["positive_photos"]
-                for row in subset if row["positive_photos"]),
+            "threshold": subset[0]["threshold"],
+            "photo_recall_macro": mean_or_none(row["recall"] for row in subset if row["recall"] is not None),
+            **{f"{field}_macro": mean_or_none(row[field] for row in subset if row[field] is not None)
+               for field in ("precision", "prevalence", "random_precision", "random_recall",
+                             "precision_ceiling", "recall_ceiling")},
+            "precision_pooled": sum(row["positive_photo_hits"] for row in subset) / sum(row["kept"] for row in subset),
+            "recall_pooled": sum(row["positive_photo_hits"] for row in subset) / sum(row["positive_photos"] for row in subset)
+                             if sum(row["positive_photos"] for row in subset) else None,
         }
     return result
 
@@ -58,7 +53,8 @@ def evaluate_split(metadata: dict, scores: dict, split: str, m3: Path,
     local = [dict(row, event=metadata[row["fingerprint"]]["event"])
              for row in labels if row["fingerprint"] in subset]
     budget = budget_metrics(metadata, scores, events)
-    return {"photos": len(subset), "events": events,
+    return {"protocol": RATING_VERSION, "photos": len(subset), "events": events,
+            "ranking": ranking_metrics(metadata, scores, events),
             "old_pairs": {kind: pair_metrics(rows, scores) for kind, rows in types.items()},
             "absolute": {source: abs_metrics([row for row in absolute if row["source"] == source], metadata, scores)
                          for source in sorted({row["source"] for row in absolute})},
@@ -99,7 +95,7 @@ def main() -> int:
             raise ValueError("局部盲评组跨越划分")
     for split in args.splits:
         inputs.extend((args.m3 / f"pairs_{split}.csv", args.abs_pairs / f"pairs_{split}.csv"))
-    inputs.append(Path(__file__))
+    inputs.extend((Path(__file__), Path(__file__).with_name("evaluation_protocol.py")))
     args.out.mkdir(parents=True, exist_ok=False)
     results = {}
     for index, path in enumerate(args.scores):
@@ -109,9 +105,9 @@ def main() -> int:
         write_json(args.out / f"model_{index}.json", result)
         results[str(path)] = f"model_{index}.json"
         print(f"评估完成 {path}", flush=True)
-    write_json(args.out / "manifest.json", {"results": results,
+    write_json(args.out / "manifest.json", {"protocol": RATING_VERSION, "results": results,
                "sha256": {str(path): digest(path) for path in [*inputs, *args.scores]},
-               "limits": "v2 开发留出；横评跨事件宏平均单位为事件对；预算为旧星>=4代理；局部来自批2/3盲评；没有新增人工标签。"})
+               "limits": "v2 开发留出；完整事件 AP 与>=3预算代理；横评宏平均单位为事件对；局部考卷只作诊断；没有新增人工标签。"})
     return 0
 
 

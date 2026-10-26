@@ -1,4 +1,4 @@
-"""统一评估协议：严格覆盖、等分处理、局部保留及固定预算下的旧标签代理。"""
+"""统一评估：完整事件排序、四档评分、严格覆盖及历史局部考卷回归。"""
 from __future__ import annotations
 
 import csv
@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 VERSION = "culling-evaluation-v1"
+RATING_VERSION = "photo-rating-v2-20261014"
 SCORE_TIE_EPSILON = 1e-8
 
 
@@ -164,9 +165,9 @@ def abs_metrics(rows: list[dict], metadata: dict, scores: dict) -> dict:
             for domain, cross in (("same_event", False), ("cross_event", True))}
 
 
-def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.05, 0.125, 0.2, 0.3),
-                   representative_scores: dict | None = None, group_max: bool = False) -> list[dict]:
-    """用指定局部分数选代表、全局分数筛选；缺省共用分数，旧星只评价，不参与选择。"""
+def legacy_cluster_budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.05, 0.125, 0.2, 0.3),
+                                  representative_scores: dict | None = None, group_max: bool = False) -> list[dict]:
+    """复算历史 v1 每团一张/≥4★ 口径，仅供历史回归诊断，不用于当期训练选择。"""
     local_scores = scores if representative_scores is None else representative_scores
     results = []
     for event in sorted(events):
@@ -199,6 +200,171 @@ def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.0
                             "score_ties": len(members) - len({scores[fingerprint] for fingerprint in members}),
                             "label_scope": "旧星>=4代理，非独立全局真值；同分以指纹哈希确定取舍"})
     return results
+
+
+def binary_ranking(labels: np.ndarray, values: np.ndarray) -> dict:
+    """返回二元排序 AP/AUC、均匀随机 AP 的解析期望与上限；等分区内均匀随机取序。"""
+    labels = np.asarray(labels, dtype=bool)
+    values = np.asarray(values, dtype=np.float64)
+    if labels.ndim != 1 or values.shape != labels.shape or not len(labels) or not np.isfinite(values).all():
+        raise ValueError("非法排序标签或分数")
+    count, positives = len(labels), int(labels.sum())
+    prevalence = positives / count
+    if not positives:
+        return {"positives": 0, "prevalence": 0.0, "ap": None, "random_ap": None,
+                "ap_ceiling": None, "ap_closure": None, "auc": None, "random_auc": None}
+    order = np.argsort(-values, kind="stable")
+    ranked, sorted_values = labels[order], values[order]
+    starts = np.r_[0, np.flatnonzero(np.diff(sorted_values)) + 1]
+    ends = np.r_[starts[1:], count]
+    hits, contribution, wins = 0, 0.0, 0.0
+    for start, end in zip(starts, ends):
+        size = int(end - start)
+        good = int(ranked[start:end].sum())
+        offsets = np.arange(size, dtype=np.float64)
+        expected_previous = offsets * (good - 1) / (size - 1) if size > 1 else offsets
+        contribution += float(np.sum(good / size * (hits + 1 + expected_previous) / (start + offsets + 1)))
+        negatives_below = count - end - (positives - hits - good)
+        wins += good * (negatives_below + 0.5 * (size - good))
+        hits += good
+    harmonic = float(np.sum(1 / np.arange(1, count + 1, dtype=np.float64)))
+    random_ap = (harmonic + (positives - 1) * (count - harmonic) / (count - 1)) / count if count > 1 else 1.0
+    average_precision = contribution / positives
+    return {"positives": positives, "prevalence": prevalence, "ap": average_precision,
+            "random_ap": random_ap, "ap_ceiling": 1.0,
+            "ap_closure": (average_precision - random_ap) / (1 - random_ap) if random_ap < 1 else None,
+            "auc": wins / (positives * (count - positives)) if positives < count else None,
+            "random_auc": 0.5 if positives < count else None}
+
+
+def expected_top_hits(labels: np.ndarray, values: np.ndarray, count: int) -> float:
+    """返回取前 count 张时的期望正例数；预算边界等分按均匀取舍，不使用指纹或真值破平局。"""
+    if count <= 0 or count > len(labels):
+        raise ValueError("预算越界")
+    boundary = np.partition(values, len(values) - count)[len(values) - count]
+    above, tied = values > boundary, values == boundary
+    remaining = count - int(above.sum())
+    return float(labels[above].sum() + labels[tied].sum() * remaining / tied.sum())
+
+
+def event_members(metadata: dict, scores: dict, events: list[str]) -> dict:
+    """验证事件、星级与分数覆盖，返回事件到全部照片的映射；不使用团顶身份筛样本。"""
+    if not events or len(events) != len(set(events)):
+        raise ValueError("事件为空或重复")
+    requested = set(events)
+    result = {event: {} for event in sorted(events)}
+    for fingerprint, row in metadata.items():
+        if row["event"] in requested:
+            if int(row["rating_raw"]) not in range(6):
+                raise ValueError(f"非法星级: {fingerprint}")
+            result[row["event"]][fingerprint] = row
+    for event, members in result.items():
+        if not members:
+            raise ValueError(f"事件无照片: {event}")
+        require_coverage(scores, members)
+    return result
+
+
+def budget_metrics(metadata: dict, scores: dict, events: list[str], budgets=(0.125, 0.25, 0.5),
+                   threshold: int = 3) -> list[dict]:
+    """在完整事件中直排取预算，返回精度/召回及同分母随机和完美排序期望；默认 ≥3★。"""
+    if threshold not in range(1, 6) or not budgets or any(not 0 < fraction <= 1 for fraction in budgets):
+        raise ValueError("非法星级门槛或预算")
+    results = []
+    for event, members in event_members(metadata, scores, events).items():
+        labels = np.array([int(row["rating_raw"]) >= threshold for row in members.values()])
+        values = np.array([scores[fingerprint] for fingerprint in members], dtype=np.float64)
+        positives, total = int(labels.sum()), len(labels)
+        for fraction in budgets:
+            count = math.ceil(total * fraction)
+            hits = expected_top_hits(labels, values, count)
+            results.append({"event": event, "budget_fraction": fraction, "threshold": threshold,
+                            "photos": total, "budget": count, "kept": count,
+                            "positive_photos": positives, "positive_photo_hits": hits,
+                            "precision": hits / count, "recall": hits / positives if positives else None,
+                            "prevalence": positives / total, "random_precision": positives / total,
+                            "random_recall": count / total if positives else None,
+                            "precision_ceiling": min(count, positives) / count,
+                            "recall_ceiling": min(count, positives) / positives if positives else None,
+                            "label_scope": "旧星代理；完整事件直排；预算取 ceil；等分均匀取舍"})
+    return results
+
+
+def ranking_metrics(metadata: dict, scores: dict, events: list[str], thresholds=(1, 2, 3)) -> dict:
+    """逐门槛报告事件宏平均与按张数加权的 AP/AUC；随机为解析期望，逐事件明细保留。"""
+    if not thresholds or any(threshold not in range(1, 6) for threshold in thresholds):
+        raise ValueError("非法排序门槛")
+    members_by_event = event_members(metadata, scores, events)
+    result = {}
+    for threshold in thresholds:
+        details = {}
+        for event, members in members_by_event.items():
+            labels = np.array([int(row["rating_raw"]) >= threshold for row in members.values()])
+            values = np.array([scores[fingerprint] for fingerprint in members])
+            details[event] = {"photos": len(members), **binary_ranking(labels, values)}
+        valid = [row for row in details.values() if row["ap"] is not None]
+        average_precision = mean_or_none(row["ap"] for row in valid)
+        random_ap = mean_or_none(row["random_ap"] for row in valid)
+        result[str(threshold)] = {"events": len(details), "events_with_positives": len(valid),
+            "ap_macro": average_precision, "random_ap_macro": random_ap,
+            "ap_ceiling": 1.0 if valid else None,
+            "ap_closure": (average_precision - random_ap) / (1 - random_ap) if valid and random_ap < 1 else None,
+            "prevalence_macro": mean_or_none(row["prevalence"] for row in details.values()),
+            "auc_macro": mean_or_none(row["auc"] for row in details.values() if row["auc"] is not None),
+            "ap_photo_weighted": float(np.average([row["ap"] for row in valid],
+                weights=[row["photos"] for row in valid])) if valid else None,
+            "by_event": details}
+    return result
+
+
+def classification_summary(truth: np.ndarray, predictions: np.ndarray) -> dict:
+    """汇总四档混淆矩阵、逐档精度/召回及准确率；缺失类别分母返回 None。"""
+    confusion = np.zeros((4, 4), dtype=np.int64)
+    np.add.at(confusion, (truth, predictions), 1)
+    support, predicted = confusion.sum(axis=1), confusion.sum(axis=0)
+    recalls = [int(confusion[category, category]) / int(support[category]) if support[category] else None
+               for category in range(4)]
+    return {"photos": len(truth), "confusion": confusion.tolist(),
+            "accuracy": float(np.trace(confusion) / len(truth)),
+            "balanced_accuracy": mean_or_none(value for value in recalls if value is not None),
+            "majority_accuracy": float(support.max() / len(truth)), "accuracy_ceiling": 1.0,
+            "uniform_random_balanced_accuracy": 0.25,
+            "by_class": {str(category): {"support": int(support[category]),
+                "predicted": int(predicted[category]), "recall": recalls[category],
+                "precision": int(confusion[category, category]) / int(predicted[category]) if predicted[category] else None}
+                for category in range(4)}}
+
+
+def rating_metrics(metadata: dict, probabilities: dict, events: list[str]) -> dict:
+    """评价 0／1／2／≥3 四类概率，返回混淆矩阵、逐事件准确率与 ≥3 档实际选出精度/召回。"""
+    members_by_event = event_members(metadata, dict.fromkeys(probabilities, 0.0), events)
+    all_truth, all_predictions, details = [], [], {}
+    for event, members in members_by_event.items():
+        values = np.array([probabilities[fingerprint] for fingerprint in members], dtype=np.float64)
+        if values.shape != (len(members), 4) or not np.isfinite(values).all() or np.any(values < 0) or np.any(values > 1):
+            raise ValueError("非法四档概率")
+        if not np.allclose(values.sum(axis=1), 1.0, atol=1e-7, rtol=0):
+            raise ValueError("四档概率之和不为一")
+        truth = np.array([min(int(row["rating_raw"]), 3) for row in members.values()])
+        predictions = values.argmax(axis=1)
+        current = classification_summary(truth, predictions)
+        positive, selected = truth == 3, predictions == 3
+        hits = int((positive & selected).sum())
+        current["selected_ge3"] = {"kept": int(selected.sum()), "positives": int(positive.sum()),
+            "hits": hits, "precision": hits / int(selected.sum()) if selected.any() else None,
+            "recall": hits / int(positive.sum()) if positive.any() else None,
+            "prevalence": float(positive.mean())}
+        details[event] = current
+        all_truth.extend(truth.tolist())
+        all_predictions.extend(predictions.tolist())
+    pooled = classification_summary(np.array(all_truth), np.array(all_predictions))
+    return {"classes": ["0", "1", "2", ">=3"], "events": len(details),
+            "accuracy_macro": mean_or_none(row["accuracy"] for row in details.values()),
+            "balanced_accuracy_macro": mean_or_none(row["balanced_accuracy"] for row in details.values()),
+            "majority_accuracy_macro": mean_or_none(row["majority_accuracy"] for row in details.values()),
+            "class_recall_macro": {str(category): mean_or_none(row["by_class"][str(category)]["recall"]
+                for row in details.values() if row["by_class"][str(category)]["recall"] is not None)
+                for category in range(4)}, "pooled": pooled, "by_event": details}
 
 
 def verify_snapshot(path: Path) -> dict:

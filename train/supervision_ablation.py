@@ -15,7 +15,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "audit"))
-from evaluation_protocol import abs_metrics, budget_metrics, digest, local_metrics, mean_or_none, pair_metrics, read_rows, verify_snapshot, write_json
+from evaluation_protocol import RATING_VERSION, abs_metrics, budget_metrics, digest, local_metrics, mean_or_none, pair_metrics, ranking_metrics, read_rows, verify_snapshot, write_json
 from supervision_data import SourceBatchSampler, build_preferences, choose_development_events, load_training_labels, quarantine_conflicts
 
 ARMS = ("legacy", "quarantine", "balanced", "source_loss")
@@ -104,13 +104,14 @@ def run_arm(args, arm: str, seed: int, pairs, features, fingerprints, labels, me
     train_labels = [row for row in labels if row["event"] not in development]
     training_golden = [{"winner": pair.winner, "loser": pair.loser, "event": pair.event}
                        for pair in selected if pair.source == "golden"]
-    result = {"arm": arm, "seed": seed, "seconds": time.monotonic() - started,
+    result = {"evaluation_protocol": RATING_VERSION, "arm": arm, "seed": seed, "seconds": time.monotonic() - started,
               "training_pairs": len(selected), "sampler": sampler.report(), "history": history,
               "golden_coefficient_mean": golden_coefficient / args.steps,
               "train_golden": pair_metrics(training_golden, scores),
               "train_local": local_metrics(train_labels, scores), "development_local": local_metrics(dev_labels, scores),
               "development_abs": abs_metrics(abs_development, metadata, scores),
               "original_val_abs": abs_metrics(abs_validation, metadata, scores),
+              "development_ranking": ranking_metrics(metadata, scores, list(development)),
               "development_budget_proxy": budget_metrics(metadata, scores, list(development))}
     destination = args.out / f"{arm}_seed{seed}"
     destination.mkdir()

@@ -8,7 +8,9 @@ import re
 import shutil
 from pathlib import Path
 
-from evaluation_protocol import VERSION, abs_metrics, budget_metrics, digest, load_scores, local_metrics, read_rows, verify_snapshot, write_json
+from evaluation_protocol import (VERSION, RATING_VERSION, abs_metrics, budget_metrics, digest,
+                                 legacy_cluster_budget_metrics, load_scores, local_metrics,
+                                 ranking_metrics, read_rows, verify_snapshot, write_json)
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = Path("D:/PhotoDB/dataset")
@@ -45,7 +47,7 @@ def freeze_inputs(output: Path, data: Path, m3: Path) -> None:
         files[filename] = {"source": str(source.resolve()), "sha256": original_hash}
     write_json(output / "manifest.json", {"protocol": VERSION, "files": files,
                "role": "既有开发回归与监督消融输入，不是新终考",
-               "budget_basis": "原始事件照片张数；模型选每团代表；旧>=4星只作评价代理",
+               "budget_basis": "完整事件直排；旧>=3星评价代理；另报每团一张/旧>=4星历史诊断",
                "human_basis": "既有复测报告的双决胜组；不宣称独立终考或多数决真值"})
     verify_snapshot(output)
     print(f"冻结完成: {output} ({len(files)} 文件)", flush=True)
@@ -98,14 +100,18 @@ def evaluate(snapshot: Path, specifications: list[str], output: Path, local_only
             models[name] = contextual_scores
         else:
             models[name] = load_scores(Path(raw_path))
-    result = {"protocol": VERSION, "snapshot_manifest_sha256": digest(snapshot / "manifest.json"),
+    result = {"protocol": RATING_VERSION, "snapshot_protocol": VERSION,
+              "evaluation_sha256": digest(Path(__file__).with_name("evaluation_protocol.py")),
+              "snapshot_manifest_sha256": digest(snapshot / "manifest.json"),
               "local_only": local_only, "human_matched_groups": len(matched_ids), "models": {}}
     for name, scores in models.items():
         contextual = isinstance(next(iter(scores)), tuple)
         current = {"local": local_metrics(labels, scores, contextual), "matched_human_groups": local_metrics(matched, scores, contextual)}
         if not local_only:
             current["direct_abs"] = abs_metrics(read_rows(snapshot / "abs_test.csv"), metadata, scores)
+            current["ranking"] = ranking_metrics(metadata, scores, split["test"])
             current["budget_proxy"] = budget_metrics(metadata, scores, split["test"])
+            current["legacy_cluster_budget_proxy"] = legacy_cluster_budget_metrics(metadata, scores, split["test"])
         result["models"][name] = current
     output.mkdir(parents=True, exist_ok=False)
     for name, source in source_paths.items():

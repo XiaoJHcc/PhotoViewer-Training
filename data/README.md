@@ -71,3 +71,15 @@
 ## 消费方
 
 Python 探针([../probes/](../probes/))只通过上述表结构契约读取数据,不依赖任何 C# 代码;只要表名/列名/版本化规则不破坏性变更,探针脚本不需要跟着改。
+
+## 修复技术侧缓存（2026-10-14）
+
+`DatasetBuilder --dump-technical` 的独立输出位于仓外 `D:/PhotoDB/dataset/technical-display-plane-v3-*`，不修改上述 SQLite schema 或存量数据。来源为固定 `Fingerprint/Path` JSON；共享算法仍来自产品 Core，训练侧不复刻 CV/DINO。
+
+- `identity.json`：`technical-cache-v1`、解码版本、带 decode 后缀的 cv_spec/model_id、来源清单 SHA256、产品/提取器程序集 SHA256、可选 ONNX SHA256、标量名/网格/输入尺寸与输出选项。身份不符拒绝续跑。
+- `<fingerprint>.cv.bin`：小端 float32 `[7,32,32]`、scalar-major；可选 `.patch.bin` 为 `[1024,384]` token-major，`.cls.bin` 为归一化 CLS，`.png` 为共享 `RenderInputImage` 产物。
+- `<fingerprint>.json`：实际显示朝向宽高、原片路径与 SHA256、每项输出 SHA256；缺失读数保持 NaN。原片指纹通过产品 PhotoFingerprint 重算核验，哈希在提取前后复核；输出完成后才落单图记录。
+- `complete.json`：请求/完成数量与 identity SHA256，只有全部请求成功才写入；输入或输出漂移直接报错，不静默使用残缺缓存。
+- 布局不等于严格坐标重合：CV 格中心为 `(index+0.5)/32`，DINO 518 输入的 patch 中心为 `(index+0.5)*16/518`，patch 只覆盖前512像素。做像素级融合前须明确这一几何差异；本轮聚合探针不使用旧 patch。
+
+核验入口与职责见 [../AGENTS.md](../AGENTS.md)；实测差异及效力边界见 [../docs/KNOWLEDGE.md](../docs/KNOWLEDGE.md) §4。

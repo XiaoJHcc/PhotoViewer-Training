@@ -35,8 +35,14 @@ internal static class Program
     private static int _total;
     private static readonly ConcurrentBag<string> _failures = new();
 
+    /// <summary>分派训练提取入口；技术缓存导出复用共享算法，不初始化产品 UI。</summary>
+    /// <param name="args">命令行参数。</param>
+    /// <returns>成功返回 0，输入或提取失败返回非零。</returns>
     private static int Main(string[] args)
     {
+        if (args.Contains("--dump-technical"))
+            return TechnicalExport.Run(args);
+
         IngestManifest manifest;
         int? concurrencyOverride;
         bool scanOnly, noPatch;

@@ -13,7 +13,7 @@ from threadpoolctl import threadpool_limits
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'audit'), str(ROOT / 'train')]
-from evaluation_protocol import read_rows, write_json, digest, budget_metrics, local_metrics, abs_metrics
+from evaluation_protocol import RATING_VERSION, read_rows, write_json, digest, budget_metrics, local_metrics, abs_metrics, ranking_metrics
 from split_eval import summarize_budget
 from protocol_eval import joined_labels
 
@@ -107,15 +107,14 @@ def measure(metadata, labels, absolute, scores, events):
              if metadata[row['fingerprint']]['event'] in events]
     rows = [row for row in absolute if all(metadata[row[field]]['event'] in events for field in ('fp_i', 'fp_j'))]
     return {'local': local_metrics(local, scores), 'abs': abs_metrics(rows, metadata, scores),
+            'ranking': ranking_metrics(metadata, scores, sorted(events)),
             'budget': summarize_budget(budget_metrics(metadata, scores, sorted(events)))}
 
 
-def balanced_utility(candidate):
-    """按事件宏平均同时衡量减量、局部选优和跨事件排序，避免只凭微小代理差异挑模型。"""
-    budget = np.mean([fold['budget']['0.125']['photo_recall_macro'] for fold in candidate['folds']])
-    local = np.mean([fold['local']['unique_best']['best1_event_macro'] for fold in candidate['folds']])
-    absolute = np.mean([fold['abs']['cross_event']['event_macro'] for fold in candidate['folds']])
-    return float((budget * local * absolute) ** (1 / 3))
+def selection_ap(candidate):
+    """按所有训练留出事件等权的 ≥3★ AP 选参数；局部冠军与横评只作诊断。"""
+    return float(np.mean([event['ap'] for fold in candidate['folds']
+                          for event in fold['ranking']['3']['by_event'].values() if event['ap'] is not None]))
 
 
 def main():
@@ -147,18 +146,19 @@ def main():
     features = {'dino': dino.astype(np.float64) * np.sqrt(dino.shape[1]),
                 'clip': cached['features'].astype(np.float64) * np.sqrt(768)}
     features['joint'] = np.concatenate((features['dino'], features['clip']), axis=1) / np.sqrt(2)
-    plan = {'folds': [train_events[fold::3] for fold in range(3)], 'penalties': [.01, .1, 1.0, 10.0],
+    plan = {'protocol': RATING_VERSION, 'folds': [train_events[fold::3] for fold in range(3)], 'penalties': [.01, .1, 1.0, 10.0],
             'source_shares': {'window': .5, 'global': .25, 'abs': .2, 'golden': .05},
-            'selection': '三折事件宏平均：照片召回、人工局部冠军、横评事件对准确率三者几何平均；不用 val/test 选参数',
+            'selection': '训练事件三折 OOF >=3★ AP；局部/横评只作诊断；不用 val/test 选参数',
             'script_sha256': digest(Path(__file__)), 'feature_sha256': digest(args.features),
             'input_sha256': {str(path): digest(path) for path in [args.m3 / 'photos.csv', args.m3 / 'pairs_train.csv',
                 args.abs_pairs / 'pairs_train.csv', args.labels_snapshot / 'golden_pairs.csv',
+                ROOT / 'audit/evaluation_protocol.py', ROOT / 'audit/split_eval.py',
                 *[args.labels_snapshot / f'batch{batch}{suffix}' for batch in (2, 3) for suffix in ('_key.csv', '.tsv')]]}}
     write_json(destination / 'plan.json', plan)
     if args.reuse_folds:
         previous = json.loads((args.reuse_folds / 'plan.json').read_text(encoding='utf-8'))
         if any(previous.get(field) != plan[field] for field in
-               ('feature_sha256', 'folds', 'source_shares', 'penalties', 'input_sha256', 'selection')):
+               ('protocol', 'script_sha256', 'feature_sha256', 'folds', 'source_shares', 'penalties', 'input_sha256', 'selection')):
             raise ValueError('不能复用不同特征、监督、抽样或事件划分的交叉验证')
     results = []
     for name, feature in features.items():
@@ -179,13 +179,15 @@ def main():
             cross = float(np.mean([metrics['abs']['cross_event']['accuracy'] for metrics in folds]))
             record = {'features': name, 'penalty': penalty, 'photo_recall': budget,
                       'local_best1': local, 'cross_accuracy': cross, 'folds': folds}
+            record['ap_ge3'] = selection_ap(record)
             results.append(record)
             write_json(destination / f'{name}_{penalty}.json', record)
-            print(f'{name} penalty={penalty} oof recall={budget:.4f} local={local:.4f} cross={cross:.4f}', flush=True)
-    chosen = max(results, key=balanced_utility)
+            print(f"{name} penalty={penalty} oof AP>=3={record['ap_ge3']:.4f} "
+                  f"recall={budget:.4f} local={local:.4f} cross={cross:.4f}", flush=True)
+    chosen = max(results, key=selection_ap)
     write_json(destination / 'chosen.json', {key: value for key, value in chosen.items() if key != 'folds'})
     for name in features:
-        candidate = max((row for row in results if row['features'] == name), key=balanced_utility)
+        candidate = max((row for row in results if row['features'] == name), key=selection_ap)
         coefficient, trace = fit(features[name], fingerprints, pairs, metadata, set(train_events), candidate['penalty'])
         scores = dict(zip(fingerprints, (features[name] @ coefficient).tolist()))
         with (destination / f'{name}_scores.csv').open('w', encoding='utf-8', newline='') as stream:
