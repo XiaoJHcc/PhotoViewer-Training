@@ -48,7 +48,7 @@
 - 基线结果：`train/out/rating_baseline_20261014_event/`、`train/out/rating_baseline_20261014_balanced/`；后者 `comparison.json` 为同事件两臂对照。统一评估实跑：`audit/out/rating_protocol_val_20261014/`。
 - 技术核验：`audit/out/technical_input_20261014/final_comparison/`；样本侧缓存 `D:/PhotoDB/dataset/technical-display-plane-v3-sample-20261014`。历史小集 CV 缓存不作为下一轮全量提取依据。
 - 一次性探针代码由本分支完整实验快照保留；结果目录、命令和数字分别见 LOG 与 KNOWLEDGE，不再登记为当前运行入口。
-- 本分支已正常合入远端去 Avalonia 与 Rating 契约更新；本地 main 未改写。HUMAN、冻结 reviews、数据库、照片、标签和 split 未写入。
+- 本分支已正常合入远端去 Avalonia 与 Rating 契约更新；本地 main 未改写。最终标准构建 0 警告/0 错误，基线两臂与统一评估回放通过，验证及归档命令见 LOG 2026-10-26。HUMAN、冻结 reviews、数据库、照片、标签和 split 未写入。
 
 ## 新会话起点
 

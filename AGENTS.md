@@ -23,23 +23,14 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 | [train/rating_baseline.py](train/rating_baseline.py) | 修复特征上的 0／1／2／≥3 分类基线：事件三折选正则；支持事件等权与事件内类别等权损失；参数冻结后只评 val，历史名次和仅作校准对照，不参与视觉模型选择。 |
 | [DatasetBuilder/TechnicalExport.cs](DatasetBuilder/TechnicalExport.cs) | `--dump-technical`：固定 Fingerprint/Path 清单驱动，复用修复 PhotoDecode 与产品 CV/DINO 算法，导出独立 CV/可选 patch/渲染侧缓存；身份/原片/输出哈希与完成闸保护续跑，不写数据集库。 |
 | [audit/technical_input_audit.py](audit/technical_input_audit.py) | 训练事件样本的修复渲染/CLS 输入闸、旧 CV/patch 差异和空间采样坐标审计；只读 DB 与原片，输出审计记录。 |
-| [train/technical_probe.py](train/technical_probe.py) | 修复 CV 的训练事件小集增量探针：每事件确定性64张、事件三折、固定分类损失/正则，视觉与视觉+CV同分母；只作可行性，不打开val/test、不当完整事件成绩。 |
-| [train/context_rating_probe.py](train/context_rating_probe.py) | 完整train事件的无标签相似邻域上下文探针：单图/相似邻域/容量匹配随机邻域，同一四档头；train闸通过才允许显式val评价，不打开test。 |
-| [train/iqa_feature_probe.py](train/iqa_feature_probe.py) | 专用画质预训练的受控信息探针：冻结TOPIQ-NR分数与256维内部质量表征，复用修复PNG和train固定小集，个人四档监督只拟合小头；不是通用画质分数直接代替选片。 |
-| [train/ordinal_rating_probe.py](train/ordinal_rating_probe.py) | 有序累计概率评分：单一潜在分数+递增门槛；单图/无标签上下文×线性/128维非线性头，完整train事件三折三种子固定步数，不读val/test。 |
-| [train/cumulative_rating_probe.py](train/cumulative_rating_probe.py) | 三边界独立方向累计logistic及无标签单调概率投影；固定0.1/event_class，单图/上下文完整train事件三折对照，不读val/test。 |
 | [STATUS.md](STATUS.md) | 当前状态真源(每次会话末重写,不追加):当前位置 / 候选数字 / 下一步 / 等待用户项 / 已冻结参数。开工先读。 |
 
 ## 构建 / 运行入口
 
-- **上下文/IQA探针**：`../Tools/.venv/Scripts/python.exe train/context_rating_probe.py --out train/out/<新目录>`，只用train完整事件，8邻居/温度10/正则0.1固定；邻域不读星级/团顶/时间。IQA使用独立 `../Tools/.venv-iqa`，按 `train/requirements-iqa.txt` 安装（CUDA包需 `--extra-index-url https://download.pytorch.org/whl/cu128`），运行 `train/iqa_feature_probe.py --out train/out/<新目录>`。本机IQA环境只读复用GPU环境torch路径，增量依赖安装在自身环境，不写原GPU环境；跨机应按requirements完整安装。
-- **有序评分探针**：`../Tools/.venv-iqa/Scripts/python.exe train/ordinal_rating_probe.py --out train/out/<新目录>`，复用原GPU torch与独立threadpoolctl；完整train事件三折×三种子、1500步/batch256固定，不早停；结果只作train开发证据，绝不据此声称新事件终考。
-- **累计评分对照**：`../Tools/.venv/Scripts/python.exe train/cumulative_rating_probe.py --out train/out/<新目录>`；单调概率投影不使用标签，凸优化失败直接报错；依赖已落盘的上下文softmax结果作为同输入参照。
-
 - **技术侧缓存**：`dotnet run --project DatasetBuilder -- --dump-technical <sources.json> --output <缓存目录> --concurrency 4 [--renders] [--patches --model-file <onnx>]`。JSON 为 `[{"Fingerprint":"...","Path":"..."}]`；输出在仓外，身份固定、版本漂移必须换目录。无 UI dispatcher、不写库；patch 提取后显式释放 ONNX 会话。
-- **输入闸/可行性**：`audit/technical_input_audit.py --cache ... --sources ... --out ...` 要求缓存包含 patch/PNG；`train/technical_probe.py --cache ... --sources ... --out ...` 消费 CV-only 缓存。前者检验当前共享输入与 corrected_features，后者只用 train 每事件64张固定小集。两脚本用 `../Tools/.venv/Scripts/python.exe`；完整 schema/身份契约 → data/README。
+- **技术输入核验**：`../Tools/.venv/Scripts/python.exe audit/technical_input_audit.py --cache ... --sources ... --out ...` 要求缓存包含 patch/PNG，检验共享渲染、CLS、旧 CV/patch 差异与采样几何；完整 schema/身份契约 → data/README。
 
-- **四档基线（2026-10-14）**：`../Tools/.venv/Scripts/python.exe train/rating_baseline.py --weighting event|event_class --out train/out/<本次目录>`（二选一，默认 event）。消费带身份哈希的 `corrected_features.npz`，训练事件三折拟合 0／1／2／≥3 分类头；固定参数后只评 val，不评 test。使用统一协议的完整事件 AP、各边界 AUC、四档混淆矩阵与预算精度/召回；类别均衡头输出不宣称真实频率校准。时间窗是可验证的方法，目标边界以 REQUIREMENTS §3/§4 为准。
+- **四档基线**：`../Tools/.venv/Scripts/python.exe train/rating_baseline.py --weighting event|event_class --out train/out/<本次目录>`（二选一，默认 event）。消费带身份哈希的 `corrected_features.npz`，训练事件三折拟合 0／1／2／≥3 分类头；固定参数后只评 val，不评 test。使用统一协议的完整事件 AP、各边界 AUC、四档混淆矩阵与预算精度/召回；类别均衡头输出不宣称真实频率校准。时间窗是可验证的方法，目标边界以 REQUIREMENTS §3/§4 为准。
 - **评估版本**：当期输出 `photo-rating-v2-20261014`；`budget_metrics` 默认完整事件直排/≥3★，不筛团顶。历史冻结输入仍是 `culling-evaluation-v1`，`protocol_eval.py` 另报 `legacy_cluster_budget_proxy` 供历史回归；旧输出与新指标不得混读。`personal_visual_ranker.py` 的参数选择改为训练事件 OOF ≥3★ AP，旧 fold 不能复用；`supervision_ablation.py` 同步输出新版本/AP，局部考卷指标仍为诊断。
 
 - **v2 开发协议**：事件配置 `data/split-v2-20260924.json`；`audit/m3_pair_gen.py --split-json ... --derived-splits train`；`audit/abs_pair_gen.py` 按原始/扩充会话隔离横评并合并复测区间。`audit/split_eval.py` 复用统一协议作逐事件与固定预算评估；`train/split_supervision_probe.py` 运行固定 CLS、等步数、三种子的原监督/去派生/直接横评供料对照。当前训练输入解码版本为 `display-plane-v3`，不得把旧 `render518` 与修复缓存混用。

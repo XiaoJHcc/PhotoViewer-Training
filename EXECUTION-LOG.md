@@ -910,3 +910,15 @@
 - **验证**：上下文邻居仅同事件、不含本片、输入不读任何标签/时间/团顶/旧分数；随机容量匹配/事件隔离/确定性断言通过。TOPIQ图像逐项对修复缓存SHA核验，权重state/实现/库版本与256维hook形状留档。共享有序logit严格递减、四类概率非负和为一；累计三点投影全部125个网格输入与独立IsotonicRegression一致。所有新Python语法与中文函数文档检查通过；落盘上下文/IQA概率独立measure复算AP与混淆矩阵匹配，输入哈希通过。
 - **文档**：AGENTS新增四脚本/IQA依赖入口，KNOWLEDGE §5.1.2/§5.1.3及负知识效力边界、story §18.6、STATUS同步；HUMAN/冻结审计/标签/数据集DB/主库未改，未提交。此轮是有限的受控方法搜索，不能承诺通过继续换头必然达到用户目标。
 - **最终回放**：有序4臂、累计2臂的落盘OOF概率每份12894张，独立measure重算AP与混淆矩阵逐项相等；输入/代码哈希复核通过。所有结果为train开发OOF，没有新增val/test评价；STATUS为65行，AGENTS入口与实际脚本一致。
+
+### 2026-10-26 · 受控探索收束、分支归档与合并验证
+
+- **归档决定**：本轮没有可升级的新候选。保留用户目标/评估纠偏、统一评估与固定四档基线、技术侧缓存和输入审计；CV 粗聚合、相似邻域、TOPIQ、共享有序头与独立累计头只保留有边界的负结论和探索观察，不继续原样换头、全量重提或长训练。
+- **分支与复现**：从 `16fc681` 创建 `archive/rating-controlled-search`。完整实验快照 `02388dc` 保留全部一次性代码与原始记录；当前主线移除 `technical_probe.py`、`context_rating_probe.py`、`iqa_feature_probe.py`、`ordinal_rating_probe.py`、`cumulative_rating_probe.py` 和 `requirements-iqa.txt`，可由该快照恢复。AGENTS 只留稳定入口，KNOWLEDGE 压缩为 §5.1.1 与负知识，STATUS 回到当前基线，story 移除独立试错进展章节。
+- **正常合并**：以 `cd12aa2` 正常 merge `origin/main`（`8cc0c9a` 去 Avalonia、`a6fa45e` 内嵌 XMP Rating 契约），未 rebase/squash，未改写本地 main。只有 STATUS 冲突，保留两侧有效修正。旧基线 `dotnet build Training.sln` 与 `--no-restore` 都因 Avalonia 中央包版本缺失报 NU1010；未改包版本或抑制错误，合入远端修复后标准构建通过。
+- **快照期回放**：13 个 Python 文件 AST 通过；上下文 3 臂、CV 2 臂、IQA 3 臂、有序 4 臂、累计 2 臂共 14 份落盘 OOF 独立调用 `measure`，三个边界 AP 与四档混淆均匹配，已记录的源码/输入哈希均一致。既有技术缓存 19/19 复用与输入闸通过。
+- **最终静态验证**：`dotnet build Training.sln` 0 警告/0 错误；55 个保留 Python 文件 AST 通过；1302 个标签/分数组合的 AP 与各预算期望均匹配同分排列枚举；`git diff --check`、五个改动文档的本地链接及冲突标记检查通过。保留代码不再引用被删探针。
+- **基线实跑**：`train/rating_baseline.py --weighting event --out train/out/archive_final_event_20261026` 用时 181.3s；`--weighting event_class --out train/out/archive_final_balanced_20261026` 用时 146.9s。两臂各完成 52 次拟合，均选 joint/正则 0.1；event val AP≥3 0.164716、四档平均召回 0.249638，event_class 为 0.165964/0.289990。与原始正式结果的输入哈希、模型/正则、三个边界 AP、混淆矩阵和系数一致；未评 test。
+- **独立评估回放**：`audit/split_eval.py` 消费本次 event_class `joint_scores.csv`，只评 val，输出 `audit/out/archive_final_joint_val_20261026/`；≥3★ 逐事件/宏平均 AP 与全部预算摘要和训练结果逐字段一致。标量 CLI 只有 `p_ge3` 分数，因此此处只核 ≥3；基线的 ≥1/≥2 使用各自累计概率，不能由该标量 CSV 复放，未把不同计分口径误当差异。
+- **技术侧实跑**：合并后新目录 19/19 提取、19/19 续跑复用通过。最终重建改变 exporter 程序集哈希，旧侧缓存按契约拒绝身份漂移；未放宽闸门，改用 `D:/PhotoDB/dataset/technical-display-plane-v3-sample-20261026-final` 再完成 19/19 提取与 19/19 复用。`audit/out/archive_final_technical_20261026/` 输入闸通过，共享渲染像素一致、最小 CLS cosine 0.999722，7/19 旧 CV/尺寸差异仍如实报告；没有全量 CV 重提。
+- **当前结论**：相似邻域的低分正向不设为默认主线；有序/累计、TOPIQ 与 CV 负结论均不外推到其它输入或监督。下一实验必须先定位具体人类取舍差异并预登记预测/最小证伪/判死条件。HUMAN、冻结 reviews、数据库、原片、标签与 split 未写入；未推送远端。
