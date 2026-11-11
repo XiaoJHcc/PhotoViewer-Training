@@ -23,12 +23,17 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 | [train/rating_baseline.py](train/rating_baseline.py) | 修复特征上的 0／1／2／≥3 分类基线：事件三折选正则；支持事件等权与事件内类别等权损失；参数冻结后只评 val，历史名次和仅作校准对照，不参与视觉模型选择。 |
 | [DatasetBuilder/TechnicalExport.cs](DatasetBuilder/TechnicalExport.cs) | `--dump-technical`：固定 Fingerprint/Path 清单驱动，复用修复 PhotoDecode 与产品 CV/DINO 算法，导出独立 CV/可选 patch/渲染侧缓存；身份/原片/输出哈希与完成闸保护续跑，不写数据集库。 |
 | [audit/technical_input_audit.py](audit/technical_input_audit.py) | 训练事件样本的修复渲染/CLS 输入闸、旧 CV/patch 差异和空间采样坐标审计；只读 DB 与原片，输出审计记录。 |
+| [audit/within_scene_audit.py](audit/within_scene_audit.py) | 同场景差异定位：复现类别均衡单图头 train OOF，把剩余差距拆到段间/段内相似组（理想重排上界、余弦分带准确率、0★ 近重兄弟）；只读，诊断不作验收。 |
+| [train/cache_patch_tokens.py](train/cache_patch_tokens.py) | 从修复 518 渲染提取冻结 DINOv3 patch 网格（fp32 前向、fp16 落盘，train+val，不提 test）；启动前对产品 ONNX 样本逐 token 一致性闸，逐图渲染哈希对修复特征清单核验，可续跑。 |
+| [train/scene_comparator.py](train/scene_comparator.py) | 同场景空间比较器登记实验（patch/CLS/置换三臂 × 三折 × 三种子 → 闸门自动判定 → 邻居融合 → 可选 val）；已按登记判死，保留为复现入口，不是候选。 |
 | [STATUS.md](STATUS.md) | 当前状态真源(每次会话末重写,不追加):当前位置 / 候选数字 / 下一步 / 等待用户项 / 已冻结参数。开工先读。 |
 
 ## 构建 / 运行入口
 
 - **技术侧缓存**：`dotnet run --project DatasetBuilder -- --dump-technical <sources.json> --output <缓存目录> --concurrency 4 [--renders] [--patches --model-file <onnx>]`。JSON 为 `[{"Fingerprint":"...","Path":"..."}]`；输出在仓外，身份固定、版本漂移必须换目录。无 UI dispatcher、不写库；patch 提取后显式释放 ONNX 会话。
 - **技术输入核验**：`../Tools/.venv/Scripts/python.exe audit/technical_input_audit.py --cache ... --sources ... --out ...` 要求缓存包含 patch/PNG，检验共享渲染、CLS、旧 CV/patch 差异与采样几何；完整 schema/身份契约 → data/README。
+- **修复 patch 网格缓存**：`PYTHONUTF8=1 ../Tools/.venv-iqa/Scripts/python.exe train/cache_patch_tokens.py --model-dir <ModelScope dinov3-vits16 目录> --output D:/PhotoDB/dataset/patches-display-plane-v3-dinov3s-<日期>`（IQA 环境已带 threadpoolctl 并复用 GPU torch；GPU 环境缺 threadpoolctl）。必须 fp32 前向：bf16 autocast 与产品 ONNX 逐 token 最低 cos 0.98，过不了闸。现有 train+val 缓存与布局 → data/README。
+- **同场景定位/比较器复现**：`audit/within_scene_audit.py --out audit/out/<目录>`（主 venv）；`train/scene_comparator.py --patches <patch 缓存> --out train/out/<目录> [--open-val] [--steps N]`（IQA 环境，常驻显存约 9GB）。单图基线复现依赖 `threadpool_limits(2)`，BLAS 线程数不同会让 L-BFGS 舍入偏离正式臂而被复现闸拦下。
 
 - **四档基线**：`../Tools/.venv/Scripts/python.exe train/rating_baseline.py --weighting event|event_class --out train/out/<本次目录>`（二选一，默认 event）。消费带身份哈希的 `corrected_features.npz`，训练事件三折拟合 0／1／2／≥3 分类头；固定参数后只评 val，不评 test。使用统一协议的完整事件 AP、各边界 AUC、四档混淆矩阵与预算精度/召回；类别均衡头输出不宣称真实频率校准。时间窗是可验证的方法，目标边界以 REQUIREMENTS §3/§4 为准。
 - **评估版本**：当期输出 `photo-rating-v2-20261014`；`budget_metrics` 默认完整事件直排/≥3★，不筛团顶。历史冻结输入仍是 `culling-evaluation-v1`，`protocol_eval.py` 另报 `legacy_cluster_budget_proxy` 供历史回归；旧输出与新指标不得混读。`personal_visual_ranker.py` 的参数选择改为训练事件 OOF ≥3★ AP，旧 fold 不能复用；`supervision_ablation.py` 同步输出新版本/AP，局部考卷指标仍为诊断。

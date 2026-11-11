@@ -83,3 +83,13 @@ Python 探针([../probes/](../probes/))只通过上述表结构契约读取数�
 - 布局不等于严格坐标重合：CV 格中心为 `(index+0.5)/32`，DINO 518 输入的 patch 中心为 `(index+0.5)*16/518`，patch 只覆盖前512像素。做像素级融合前须明确这一几何差异；本轮聚合探针不使用旧 patch。
 
 核验入口与职责见 [../AGENTS.md](../AGENTS.md)；实测差异及效力边界见 [../docs/KNOWLEDGE.md](../docs/KNOWLEDGE.md) §4。
+
+## 修复 patch 网格缓存（2026-11-11）
+
+`train/cache_patch_tokens.py` 的仓外输出 `D:/PhotoDB/dataset/patches-display-plane-v3-dinov3s-*`，只消费 `render518-display-plane-v3` 修复 PNG，不修改数据集库。现有目录覆盖 v2 train+val 18331 张，test 未提取。
+
+- `patches.f16.npy`：`[照片, 1024, 384]` float16，token 为 32×32 行优先网格，取 `last_hidden_state` 末 1024 个 token（跳过 CLS 与 4 个 register），与产品 ONNX `patch_tokens` 同义；fp32 前向。
+- `fingerprints.json`：行序 = `corrected_features.npz` 指纹顺序中属于所选 split 的子集。
+- `identity.json`：解码版本、split、权重/照片清单/修复特征/代码 SHA256、产品 ONNX 一致性闸统计；身份不符拒绝续跑。
+- `progress.json`：逐图渲染 SHA256，提取时逐一对照修复特征清单；`complete.json`：全覆盖后的 patch 文件 SHA256，消费方须校验后再用。
+- 几何口径同上节：patch 只覆盖 518 输入的前 512 像素。
