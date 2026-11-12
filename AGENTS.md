@@ -30,6 +30,8 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 | [audit/event_learning_curve.py](audit/event_learning_curve.py) | 独立事件数学习曲线：留一事件、k 个其它事件拟合单图头，看整场 AP 与团内准确率是否随事件数上升。 |
 | [audit/within_event_transfer.py](audit/within_event_transfer.py) | 团内取舍是否事件特异：同事件按段分两半学成对方向/互评，对照跨事件模型。 |
 | [train/zero_shot_iqa.py](train/zero_shot_iqa.py) / [train/zero_shot_eval.py](train/zero_shot_eval.py) | 外部预训练美学/画质模型（pyiqa 官方权重）在保持宽高比预览上零样本打分，并按登记闸判读团内/golden/整场 AP；过闸才融合与评 val（已判未过闸）。 |
+| [train/layout_probe.py](train/layout_probe.py) | 内容无关布局描述：只由单图 patch 两两相似度与网格位置算 52 个构图量（对特征空间旋转不变），线性成对读法按三折留出判读团内/golden，对照位置置换、等维内容摘要、单图头与融合；Stage B 倾斜单图四档看整场 AP；`--control random|truth` 只验证管线。 |
+| [train/layout_map_probe.py](train/layout_map_probe.py) | 同一前提的学习式读法：每图 5 通道关系图（显著度、逐图前三主成分投影、相邻边界强度）+ 坐标交给约 1.3 万参数的逐图打分卷积网，三种子、三折留出，闸门与对照沿用 `layout_probe.py`。 |
 | [STATUS.md](STATUS.md) | 当前状态真源(每次会话末重写,不追加):当前位置 / 候选数字 / 下一步 / 等待用户项 / 已冻结参数。开工先读。 |
 
 ## 构建 / 运行入口
@@ -38,6 +40,7 @@ AI 训练一等模块:从产品仓库(`PhotoViewer/Core`)提取 DINOv3 特征 + 
 - **技术输入核验**：`../Tools/.venv/Scripts/python.exe audit/technical_input_audit.py --cache ... --sources ... --out ...` 要求缓存包含 patch/PNG，检验共享渲染、CLS、旧 CV/patch 差异与采样几何；完整 schema/身份契约 → data/README。
 - **修复 patch 网格缓存**：`PYTHONUTF8=1 ../Tools/.venv-iqa/Scripts/python.exe train/cache_patch_tokens.py --model-dir <ModelScope dinov3-vits16 目录> --output D:/PhotoDB/dataset/patches-display-plane-v3-dinov3s-<日期>`（IQA 环境已带 threadpoolctl 并复用 GPU torch；GPU 环境缺 threadpoolctl）。必须 fp32 前向：bf16 autocast 与产品 ONNX 逐 token 最低 cos 0.98，过不了闸。现有 train+val 缓存与布局 → data/README。
 - **同场景定位/比较器复现**：`audit/within_scene_audit.py --out audit/out/<目录>`（主 venv）；`train/scene_comparator.py --patches <patch 缓存> --out train/out/<目录> [--open-val] [--steps N]`（IQA 环境，常驻显存约 9GB）。单图基线复现依赖 `threadpool_limits(2)`，BLAS 线程数不同会让 L-BFGS 舍入偏离正式臂而被复现闸拦下。
+- **布局描述探针**：`PYTHONUTF8=1 ../Tools/.venv-iqa/Scripts/python.exe train/layout_probe.py --patches <patch 缓存> --out train/out/<目录> [--descriptors <既有 descriptors.npz>] [--control random|truth] [--open-val]`。首跑校验 14GB 缓存哈希并逐图提取描述（写 `descriptors.npz`），之后用 `--descriptors` 复用；val 只在两道闸均过且显式授权时提取与评价。`train/layout_map_probe.py` 参数相同（复用开关为 `--maps <maps.npz>`）。
 - **零样本外部模型**：先 `dotnet run --project DatasetBuilder -- --dump-technical <sources.json> --output D:/PhotoDB/dataset/preview1024-... --preview-long-edge 1024 --no-cv --concurrency 8`（并发 16 实测偶发 libheif “Unsupported codec”，8 稳定），再 IQA 环境 `train/zero_shot_iqa.py --previews <目录> --out <目录>` 与 `train/zero_shot_eval.py --scores <scores.npz> --out <目录>`；`audit/golden_label_check.py`、`audit/event_learning_curve.py`、`audit/within_event_transfer.py` 均只读 train 事件。
 
 - **四档基线**：`../Tools/.venv/Scripts/python.exe train/rating_baseline.py --weighting event|event_class --out train/out/<本次目录>`（二选一，默认 event）。消费带身份哈希的 `corrected_features.npz`，训练事件三折拟合 0／1／2／≥3 分类头；固定参数后只评 val，不评 test。使用统一协议的完整事件 AP、各边界 AUC、四档混淆矩阵与预算精度/召回；类别均衡头输出不宣称真实频率校准。时间窗是可验证的方法，目标边界以 REQUIREMENTS §3/§4 为准。
