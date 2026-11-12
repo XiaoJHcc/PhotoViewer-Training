@@ -93,3 +93,10 @@ Python 探针([../probes/](../probes/))只通过上述表结构契约读取数�
 - `identity.json`：解码版本、split、权重/照片清单/修复特征/代码 SHA256、产品 ONNX 一致性闸统计；身份不符拒绝续跑。
 - `progress.json`：逐图渲染 SHA256，提取时逐一对照修复特征清单；`complete.json`：全覆盖后的 patch 文件 SHA256，消费方须校验后再用。
 - 几何口径同上节：patch 只覆盖 518 输入的前 512 像素。
+
+## 保持宽高比预览缓存（2026-11-11）
+
+`--dump-technical ... --preview-long-edge N [--no-cv]` 的仓外输出 `D:/PhotoDB/dataset/preview1024-display-plane-v3-train-20261111`（v2 train 12894 张，长边 1024，约 18GB）。像素路径 = 修复 `PhotoDecode`（显示朝向）→ 产品 `ColorEngine.ToSrgb8` → `SkiaImageCodec.ScaleToLongEdge`（不放大、不裁切）→ PNG。
+- `identity.json`：`preview_long_edge` 与 `cv_spec`（`--no-cv` 时为 null）入身份，其余同技术侧缓存；来源清单不同必须换目录。
+- `<fingerprint>.preview.png` 与单图记录中的 `preview_sha256`；`--no-cv` 时不写 `.cv.bin`，`cv_sha256` 为 null。
+- 用途：需要正确宽高比的外部模型（如零样本美学/画质）；不得替代 518 方形 DINO 输入。

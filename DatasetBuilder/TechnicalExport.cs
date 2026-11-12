@@ -3,26 +3,27 @@ using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using PhotoViewer.Core.AI;
+using PhotoViewer.Core.Color;
 using PhotoViewer.Core.Database;
 using PhotoViewer.Core.Image;
 
 namespace DatasetBuilder;
 
-/// <summary>按固定来源清单导出带身份哈希的修复 CV/patch 侧缓存；不写数据集库或原始照片。</summary>
+/// <summary>按固定来源清单导出带身份哈希的修复 CV/patch/预览侧缓存；不写数据集库或原始照片。</summary>
 internal static class TechnicalExport
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
     /// <summary>解析技术导出参数并执行真实提取，返回进程退出码。</summary>
-    /// <param name="args">来源清单、输出目录、并发与可选 patch/渲染参数。</param>
+    /// <param name="args">来源清单、输出目录、并发与可选 patch/渲染/预览参数。</param>
     /// <returns>成功返回 0，输入或提取异常返回 3。</returns>
     public static int Run(string[] args)
     {
         try
         {
             string? sources = null, output = null, model = null;
-            bool patches = false, renders = false;
-            int concurrency = 2;
+            bool patches = false, renders = false, cv = true;
+            int concurrency = 2, preview = 0;
             for (int index = 0; index < args.Length; index++)
             {
                 switch (args[index])
@@ -33,12 +34,16 @@ internal static class TechnicalExport
                     case "--concurrency": concurrency = int.Parse(args[++index]); break;
                     case "--patches": patches = true; break;
                     case "--renders": renders = true; break;
+                    case "--preview-long-edge": preview = int.Parse(args[++index]); break;
+                    case "--no-cv": cv = false; break;
                     default: throw new ArgumentException($"未知技术导出参数: {args[index]}");
                 }
             }
-            if (sources == null || output == null || concurrency < 1 || patches != (model != null))
-                throw new ArgumentException("需要 --dump-technical <来源JSON> --output <目录>；--patches 与 --model-file 必须同时提供；并发须大于0。");
-            return ExportAsync(sources, output, concurrency, patches, renders, model).GetAwaiter().GetResult();
+            if (sources == null || output == null || concurrency < 1 || patches != (model != null) || preview < 0)
+                throw new ArgumentException("需要 --dump-technical <来源JSON> --output <目录>；--patches 与 --model-file 必须同时提供；并发须大于0；预览长边不得为负。");
+            if (!cv && !patches && !renders && preview == 0)
+                throw new ArgumentException("--no-cv 时至少要请求一种其它输出。");
+            return ExportAsync(sources, output, concurrency, patches, renders, model, preview, cv).GetAwaiter().GetResult();
         }
         catch (Exception exception)
         {
@@ -58,9 +63,12 @@ internal static class TechnicalExport
     /// <param name="patches">是否提取双输出 ONNX。</param>
     /// <param name="renders">是否保存共享预处理 PNG。</param>
     /// <param name="modelPath">patch 模型路径，不提取时为空。</param>
+    /// <param name="preview">保持宽高比的 sRGB 预览长边像素，0 表示不导出。</param>
+    /// <param name="cv">是否导出 CV 网格；只要预览时可关闭以省算力。</param>
     /// <returns>所有请求完成后返回 0，异常由调用方处理。</returns>
     private static async Task<int> ExportAsync(string sourcesPath, string output, int concurrency,
-                                              bool patches, bool renders, string? modelPath)
+                                              bool patches, bool renders, string? modelPath,
+                                              int preview, bool cv)
     {
         byte[] sourceBytes = File.ReadAllBytes(sourcesPath);
         var sources = JsonSerializer.Deserialize<Source[]>(sourceBytes)
@@ -78,7 +86,7 @@ internal static class TechnicalExport
         {
             format = "technical-cache-v1",
             decode_version = PhotoDecode.Version,
-            cv_spec = $"{CvGridResult.CurrentVersion}+decode-{PhotoDecode.Version}",
+            cv_spec = cv ? $"{CvGridResult.CurrentVersion}+decode-{PhotoDecode.Version}" : null,
             model_id = patches ? $"{DinoModelResources.ModelId}+decode-{PhotoDecode.Version}" : null,
             sources_sha256 = Hash(sourceBytes),
             product_assembly_sha256 = HashFile(typeof(CvGridExtractor).Assembly.Location),
@@ -90,6 +98,7 @@ internal static class TechnicalExport
             patch_size = DinoModelResources.PatchSize,
             save_patches = patches,
             save_renders = renders,
+            preview_long_edge = preview,
             requested = sources.Length
         };
         Directory.CreateDirectory(output);
@@ -105,7 +114,7 @@ internal static class TechnicalExport
             string sourceHash = HashFile(source.Path);
             if (File.Exists(recordPath))
             {
-                ValidateExisting(recordPath, prefix, source, sourceHash, patches, renders);
+                ValidateExisting(recordPath, prefix, source, sourceHash, patches, renders, preview > 0, cv);
                 Interlocked.Increment(ref reused);
             }
             else
@@ -121,11 +130,15 @@ internal static class TechnicalExport
                     throw new InvalidDataException($"原片指纹已漂移: {source.Path}");
                 using var image = PhotoDecode.LoadBitmap(source.Path)
                     ?? throw new InvalidDataException($"原片解码失败: {source.Path}");
-                var cv = await CvGridExtractor.ExtractAsync(image, cancellation);
-                if (cv.Data.Length != CvGridResult.DataLength || cv.Data.Any(float.IsInfinity))
-                    throw new InvalidDataException("CV 输出形状或有限性错误。");
-                byte[] cvBytes = cv.Encode();
-                string? clsHash = null, patchHash = null, renderHash = null;
+                byte[]? cvBytes = null;
+                if (cv)
+                {
+                    var grid = await CvGridExtractor.ExtractAsync(image, cancellation);
+                    if (grid.Data.Length != CvGridResult.DataLength || grid.Data.Any(float.IsInfinity))
+                        throw new InvalidDataException("CV 输出形状或有限性错误。");
+                    cvBytes = grid.Encode();
+                }
+                string? clsHash = null, patchHash = null, renderHash = null, previewHash = null;
                 if (patches)
                 {
                     var dual = await DinoFeatureExtractor.ExtractDualAsync(image, includePatches: true, cancellation);
@@ -146,9 +159,16 @@ internal static class TechnicalExport
                     WriteImmutable(prefix + ".png", renderBytes);
                     renderHash = Hash(renderBytes);
                 }
+                if (preview > 0)
+                {
+                    byte[] previewBytes = EncodePreview(image, preview);
+                    WriteImmutable(prefix + ".preview.png", previewBytes);
+                    previewHash = Hash(previewBytes);
+                }
                 if (HashFile(source.Path) != sourceHash)
                     throw new InvalidDataException($"提取期间原片发生变化: {source.Path}");
-                WriteImmutable(prefix + ".cv.bin", cvBytes);
+                if (cvBytes != null)
+                    WriteImmutable(prefix + ".cv.bin", cvBytes);
                 WriteImmutable(recordPath, JsonSerializer.SerializeToUtf8Bytes(new
                 {
                     fingerprint = source.Fingerprint,
@@ -156,10 +176,11 @@ internal static class TechnicalExport
                     source_sha256 = sourceHash,
                     width = image.Width,
                     height = image.Height,
-                    cv_sha256 = Hash(cvBytes),
+                    cv_sha256 = cvBytes != null ? Hash(cvBytes) : null,
                     cls_sha256 = clsHash,
                     patches_sha256 = patchHash,
-                    render_sha256 = renderHash
+                    render_sha256 = renderHash,
+                    preview_sha256 = previewHash
                 }, JsonOptions));
             }
             int completed = Interlocked.Increment(ref done);
@@ -185,23 +206,44 @@ internal static class TechnicalExport
     /// <param name="sourceHash">当前原片哈希。</param>
     /// <param name="patches">是否要求双输出。</param>
     /// <param name="renders">是否要求 PNG。</param>
-    private static void ValidateExisting(string recordPath, string prefix, Source source, string sourceHash, bool patches, bool renders)
+    /// <param name="preview">是否要求保持宽高比的预览 PNG。</param>
+    /// <param name="cv">是否要求 CV 网格。</param>
+    private static void ValidateExisting(string recordPath, string prefix, Source source, string sourceHash, bool patches, bool renders,
+                                        bool preview, bool cv)
     {
         using var document = JsonDocument.Parse(File.ReadAllBytes(recordPath));
         var record = document.RootElement;
         if (record.GetProperty("fingerprint").GetString() != source.Fingerprint || record.GetProperty("source_sha256").GetString() != sourceHash
             || record.GetProperty("source_path").GetString() != Path.GetFullPath(source.Path))
             throw new InvalidDataException($"缓存来源漂移: {source.Path}");
-        var files = new List<(string Suffix, string Key)> { (".cv.bin", "cv_sha256") };
+        var files = new List<(string Suffix, string Key)>();
+        if (cv)
+            files.Add((".cv.bin", "cv_sha256"));
         if (patches)
             files.AddRange([(".cls.bin", "cls_sha256"), (".patch.bin", "patches_sha256")]);
         if (renders)
             files.Add((".png", "render_sha256"));
+        if (preview)
+            files.Add((".preview.png", "preview_sha256"));
         foreach (var file in files)
         {
             if (record.GetProperty(file.Key).GetString() != HashFile(prefix + file.Suffix))
                 throw new InvalidDataException($"缓存输出漂移: {prefix + file.Suffix}");
         }
+    }
+
+    /// <summary>把修复解码图转 sRGB8 后按长边高质量缩放（不放大、不裁切、保持宽高比），编码为 PNG。</summary>
+    /// <param name="image">PhotoDecode 产出的显示朝向图像。</param>
+    /// <param name="longEdge">目标长边像素。</param>
+    /// <returns>PNG 字节。</returns>
+    private static byte[] EncodePreview(DecodedImage image, int longEdge)
+    {
+        using var srgb = ColorEngine.ToSrgb8(image);
+        using var scaled = SkiaImageCodec.ScaleToLongEdge(srgb, longEdge);
+        using var stream = new MemoryStream();
+        if (!SkiaImageCodec.SavePng(scaled ?? srgb, stream))
+            throw new InvalidDataException("预览 PNG 编码失败。");
+        return stream.ToArray();
     }
 
     /// <summary>按小端 float32 编码有限的 ONNX 数组，返回二进制缓冲。</summary>
